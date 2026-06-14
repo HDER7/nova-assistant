@@ -1,0 +1,177 @@
+package com.nova.assistant.ai;
+
+import com.nova.assistant.ai.dto.ChatMessage;
+import com.nova.assistant.ai.dto.ChatRequest;
+import com.nova.assistant.ai.dto.ChatResponse;
+import com.nova.assistant.ai.dto.ProviderContext;
+import com.nova.assistant.config.AppProperties;
+import com.nova.assistant.conversation.dto.MessageResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+@Service
+@RequiredArgsConstructor
+public class AiService {
+
+    private static final int MAX_TOOL_ITERATIONS = 5;
+
+    private final AiProvider provider;        // @Primary (OpenAI-compatible or mock)
+    private final MockAiProvider fallback;    // resilience if the live call fails
+    private final AiPersistence persistence;
+    private final AppProperties properties;
+    private final ToolService toolService;
+
+    private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "nova-sse");
+        t.setDaemon(true);
+        return t;
+    });
+
+    public ChatResponse chat(UUID userId, ChatRequest req) {
+        String message = req.message().trim();
+        ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
+        String answer = generateAgentic(userId, ctx.messages());
+        MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
+        return new ChatResponse(ctx.conversationId(), mr);
+    }
+
+    public SseEmitter stream(UUID userId, ChatRequest req) {
+        SseEmitter emitter = new SseEmitter(180_000L);
+        String message = req.message().trim();
+        executor.execute(() -> {
+            try {
+                ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
+                emitter.send(SseEmitter.event().name("meta")
+                        .data(Map.of("conversationId", ctx.conversationId().toString()), MediaType.APPLICATION_JSON));
+
+                String answer = generateAgentic(userId, ctx.messages());
+                for (String token : tokenize(answer)) {
+                    emitter.send(SseEmitter.event().name("token")
+                            .data(Map.of("t", token), MediaType.APPLICATION_JSON));
+                    Thread.sleep(14);
+                }
+
+                MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
+                emitter.send(SseEmitter.event().name("done").data(mr, MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (Exception ex) {
+                try {
+                    emitter.completeWithError(ex);
+                } catch (Exception ignored) {
+                    // client gone
+                }
+            }
+        });
+        return emitter;
+    }
+
+    /** One-off completion without tools (document analysis, etc.). */
+    public String oneShot(String systemPrompt, String userContent) {
+        return generate(List.of(
+                new ChatMessage("system", systemPrompt),
+                new ChatMessage("user", userContent)));
+    }
+
+    public Map<String, Object> status() {
+        return Map.of(
+                "provider", provider.name(),
+                "live", provider.live(),
+                "model", properties.getAi().getOpenai().getModel());
+    }
+
+    /** Plain completion (no tools), with graceful fallback to the local brain. */
+    private String generate(List<ChatMessage> messages) {
+        double temperature = properties.getAi().getOpenai().getTemperature();
+        int maxTokens = properties.getAi().getOpenai().getMaxTokens();
+        try {
+            return provider.complete(messages, temperature, maxTokens);
+        } catch (Exception e) {
+            return fallback.complete(messages, temperature, maxTokens);
+        }
+    }
+
+    /**
+     * Agentic completion: lets the model call NOVA's tools (create task/reminder/note/
+     * event/memory, list tasks) and loops until it produces a final natural-language reply.
+     * Only the live OpenAI-compatible provider supports tools; otherwise we degrade to the
+     * local brain.
+     */
+    private String generateAgentic(UUID userId, List<ChatMessage> baseMessages) {
+        double temperature = properties.getAi().getOpenai().getTemperature();
+        int maxTokens = properties.getAi().getOpenai().getMaxTokens();
+
+        if (!(provider instanceof OpenAiProvider openAi)) {
+            try {
+                return provider.complete(baseMessages, temperature, maxTokens);
+            } catch (Exception e) {
+                return fallback.complete(baseMessages, temperature, maxTokens);
+            }
+        }
+
+        try {
+            List<Map<String, Object>> msgs = new ArrayList<>();
+            for (ChatMessage m : baseMessages) {
+                Map<String, Object> mm = new HashMap<>();
+                mm.put("role", m.role());
+                mm.put("content", m.content());
+                msgs.add(mm);
+            }
+            List<Map<String, Object>> tools = toolService.toolSpecs();
+
+            for (int iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+                Map<String, Object> assistant = openAi.chatRaw(msgs, tools, temperature, maxTokens);
+                Object toolCalls = assistant.get("tool_calls");
+
+                if (!(toolCalls instanceof List<?> calls) || calls.isEmpty()) {
+                    Object content = assistant.get("content");
+                    return content == null ? "" : content.toString().trim();
+                }
+
+                msgs.add(assistant); // assistant turn carrying the tool_calls
+                for (Object o : calls) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> call = (Map<String, Object>) o;
+                    String id = String.valueOf(call.get("id"));
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> function = (Map<String, Object>) call.get("function");
+                    String fname = function == null ? null : String.valueOf(function.get("name"));
+                    String fargs = function == null ? null : String.valueOf(function.get("arguments"));
+                    String result = toolService.execute(userId, fname, fargs);
+
+                    Map<String, Object> toolMsg = new HashMap<>();
+                    toolMsg.put("role", "tool");
+                    toolMsg.put("tool_call_id", id);
+                    toolMsg.put("content", result);
+                    msgs.add(toolMsg);
+                }
+            }
+
+            // Safety net: force a final answer without tools.
+            Map<String, Object> finalMsg = openAi.chatRaw(msgs, null, temperature, maxTokens);
+            Object content = finalMsg.get("content");
+            return content == null ? "" : content.toString().trim();
+        } catch (Exception e) {
+            return fallback.complete(baseMessages, temperature, maxTokens);
+        }
+    }
+
+    private List<String> tokenize(String text) {
+        List<String> out = new ArrayList<>();
+        if (text == null || text.isEmpty()) return out;
+        String[] words = text.split(" ");
+        for (int i = 0; i < words.length; i++) {
+            out.add(i == words.length - 1 ? words[i] : words[i] + " ");
+        }
+        return out;
+    }
+}

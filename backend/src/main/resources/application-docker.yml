@@ -1,0 +1,6 @@
+# Overrides applied when SPRING_PROFILES_ACTIVE=docker.
+# Connection values are injected through environment variables by docker-compose;
+# this file simply documents the active profile.
+logging:
+  level:
+    com.nova.assistant: INFO

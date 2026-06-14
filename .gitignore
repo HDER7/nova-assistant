@@ -1,0 +1,22 @@
+.env
+*.local
+backend/target/
+*.class
+node_modules/
+frontend/.next/
+frontend/out/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
+backend/uploads/
+
+# Local run / diagnostics (no subir al repo)
+*.bat
+probe*.sh
+_verify.txt
+_nova_status.txt
+_openai_test.txt
+_models.txt

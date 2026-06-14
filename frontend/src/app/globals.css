@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
+  --surface: 0 0% 100%;
+  --card: 0 0% 100%;
+  --muted: 214 32% 91%;
+  --muted-foreground: 215 16% 40%;
+  --primary: 190 95% 40%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 265 84% 58%;
+  --accent-foreground: 0 0% 100%;
+  --border: 214 30% 84%;
+  --input: 214 30% 84%;
+  --ring: 190 95% 42%;
+  --danger: 0 84% 60%;
+  --success: 152 60% 40%;
+  --warning: 38 92% 48%;
+}
+
+.dark {
+  --background: 222 47% 5%;
+  --foreground: 200 28% 92%;
+  --surface: 220 40% 9%;
+  --card: 221 39% 8%;
+  --muted: 217 33% 16%;
+  --muted-foreground: 214 18% 60%;
+  --primary: 187 100% 50%;
+  --primary-foreground: 222 47% 6%;
+  --accent: 265 90% 68%;
+  --accent-foreground: 222 47% 6%;
+  --border: 205 45% 22%;
+  --input: 217 33% 18%;
+  --ring: 187 100% 50%;
+  --danger: 0 84% 62%;
+  --success: 152 62% 48%;
+  --warning: 38 92% 55%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Futuristic ambient grid + glow backdrop */
+.nova-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(circle at 12% 18%, hsl(var(--primary) / 0.10), transparent 42%),
+    radial-gradient(circle at 88% 82%, hsl(var(--accent) / 0.10), transparent 45%),
+    linear-gradient(hsl(var(--border) / 0.25) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border) / 0.25) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+}
+
+.glass {
+  background-color: hsl(var(--surface) / 0.72);
+  backdrop-filter: blur(14px);
+  border: 1px solid hsl(var(--border) / 0.8);
+}
+
+.glow-text {
+  text-shadow: 0 0 14px hsl(var(--primary) / 0.55);
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35), 0 0 22px -6px hsl(var(--primary) / 0.5);
+}
+
+.clip-hex {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.3);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.5);
+}
+
+@layer components {
+  .nova-card {
+    @apply glass rounded-2xl p-5 shadow-glow;
+  }
+  .nova-input {
+    @apply w-full rounded-xl border border-border bg-background/60 px-4 py-2.5 text-sm
+      outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30
+      placeholder:text-muted-foreground;
+  }
+  .nova-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm
+      font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .nova-btn-primary {
+    @apply nova-btn bg-primary text-primary-foreground shadow-glow hover:brightness-110;
+  }
+  .nova-btn-ghost {
+    @apply nova-btn border border-border bg-transparent text-foreground hover:bg-muted/50;
+  }
+  .nova-chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-border bg-muted/40
+      px-2.5 py-1 text-xs text-muted-foreground;
+  }
+}
+
+/* Typing caret for streaming responses */
+.typing-caret::after {
+  content: "▋";
+  margin-left: 2px;
+  color: hsl(var(--primary));
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}
