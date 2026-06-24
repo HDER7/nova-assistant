@@ -101,6 +101,7 @@ public class AiPersistence {
         StringBuilder sb = new StringBuilder(PERSONA);
         sb.append("\nFecha y hora actual: ").append(ZonedDateTime.now().format(ES)).append('.');
         sb.append("\n\nIMPORTANTE: cuando el usuario pida crear, agendar, anotar, recordar o guardar algo (tareas, recordatorios, notas, eventos de calendario o datos a memorizar), DEBES usar las herramientas disponibles para hacerlo realmente; no te limites a decir que lo hiciste. Calcula las fechas y horas absolutas en formato ISO-8601 UTC a partir de la fecha actual indicada arriba. Despues de usar una herramienta, confirma al usuario lo realizado de forma breve y natural.");
+        sb.append("\n\nComo asistente de un SOC puedes usar las herramientas web_search, virustotal_lookup, cve_lookup y extract_iocs para investigar IOCs, reputacion y vulnerabilidades. Tambien sabes programar: escribe, explica, refactoriza y revisa codigo, incluido el analisis de seguridad de scripts. Cuando incluyas codigo, usalo en bloques markdown indicando el lenguaje, por ejemplo ```python ... ```.");
         List<String> memories = memoryService.contextSnippets(userId);
         if (!memories.isEmpty()) {
             sb.append("\n\nDatos recordados sobre el usuario:\n");

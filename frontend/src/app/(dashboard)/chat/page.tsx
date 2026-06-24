@@ -8,7 +8,8 @@ import { api, streamChat } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { ArcReactor } from "@/components/ArcReactor";
-import { createRecognition, speechSupported, speak, cancelSpeech, ttsSupported, type SpeechRecognitionLike } from "@/lib/speech";
+import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { speak, cancelSpeech, ttsSupported } from "@/lib/speech";
 import type { Conversation, Message } from "@/lib/types";
 import { cn, relativeTime } from "@/lib/utils";
 
@@ -21,27 +22,31 @@ interface ChatMessage {
 
 const STREAMING_ID = "__streaming__";
 const SUGGESTIONS = [
-  "Recuerda que prefiero el té al café",
-  "Crea una tarea para preparar la reunión de mañana",
-  "¿Qué tienes en mi agenda esta semana?",
-  "Resume en 3 puntos cómo puedes ayudarme",
+  "Recuerda que prefiero los informes en inglés",
+  "¿Qué reputación tiene 8.8.8.8 en VirusTotal?",
+  "Busca el CVE-2024-3094 y créame una tarea para parchear",
+  "Escríbeme un script de Python que extraiga IOCs de un log",
 ];
 
 export default function ChatPage() {
   const user = useAuthStore((s) => s.user);
   const pushToast = useUIStore((s) => s.pushToast);
   const lang = user?.locale === "en" ? "en-US" : "es-ES";
+  const sttLang = user?.locale === "en" ? "en" : "es";
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [listening, setListening] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(false);
 
   const endRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const speakRef = useRef(false);
   speakRef.current = speakReplies;
 
@@ -117,9 +122,7 @@ export default function ChatPage() {
         },
         onToken: (t) => {
           finalText += t;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === STREAMING_ID ? { ...m, content: m.content + t } : m))
-          );
+          setMessages((prev) => prev.map((m) => (m.id === STREAMING_ID ? { ...m, content: m.content + t } : m)));
         },
         onDone: (msg) => {
           const done = msg as Message;
@@ -137,9 +140,7 @@ export default function ChatPage() {
         onError: () => {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === STREAMING_ID
-                ? { ...m, content: "⚠️ No se pudo obtener respuesta. Inténtalo de nuevo." }
-                : m
+              m.id === STREAMING_ID ? { ...m, content: "⚠️ No se pudo obtener respuesta. Inténtalo de nuevo." } : m
             )
           );
           setStreaming(false);
@@ -148,38 +149,54 @@ export default function ChatPage() {
     );
   }
 
-  function toggleMic() {
-    if (listening) {
-      recognitionRef.current?.stop();
-      setListening(false);
+  async function toggleMic() {
+    if (recording) {
+      recorderRef.current?.stop();
       return;
     }
-    if (!speechSupported()) {
-      pushToast({ title: "Tu navegador no soporta dictado por voz", variant: "error" });
+    const md = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    if (!md || !md.getUserMedia || typeof MediaRecorder === "undefined") {
+      pushToast({ title: "Tu navegador no soporta grabación de audio", variant: "error" });
       return;
     }
-    const rec = createRecognition(lang);
-    if (!rec) return;
-    rec.onresult = (e: any) => {
-      let transcript = "";
-      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
-      setInput(transcript);
-      if (e.results[e.results.length - 1].isFinal) {
-        setListening(false);
-        rec.stop();
-        send(transcript);
-      }
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recognitionRef.current = rec;
-    rec.start();
-    setListening(true);
+    try {
+      const stream = await md.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const form = new FormData();
+          form.append("file", blob, "audio.webm");
+          form.append("language", sttLang);
+          const res = await api.postForm<{ text: string }>("/api/voice/transcribe", form);
+          const t = (res.text || "").trim();
+          if (t) send(t);
+          else pushToast({ title: "No se entendió el audio", variant: "default" });
+        } catch {
+          pushToast({ title: "No se pudo transcribir el audio", variant: "error" });
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      pushToast({ title: "No se pudo acceder al micrófono", variant: "error" });
+    }
   }
 
   return (
     <div className="grid h-[calc(100vh-7rem)] grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-      {/* Conversation rail */}
       <aside className="hidden flex-col rounded-2xl border border-border bg-surface/60 lg:flex">
         <button onClick={newConversation} className="nova-btn-primary m-3">
           <Plus className="h-4 w-4" /> Nueva conversación
@@ -205,7 +222,6 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* Chat */}
       <section className="flex flex-col overflow-hidden rounded-2xl border border-border bg-surface/40">
         <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6">
           {messages.length === 0 ? (
@@ -214,7 +230,7 @@ export default function ChatPage() {
               <div>
                 <h2 className="text-xl font-semibold glow-text">NOVA está lista</h2>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Habla o escribe. Recuerdo lo importante, gestiono tu día y razono contigo.
+                  Habla o escribe. Investigo IOCs, ejecuto acciones, programo y recuerdo lo importante.
                 </p>
               </div>
               <div className="grid max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">
@@ -235,7 +251,6 @@ export default function ChatPage() {
           <div ref={endRef} />
         </div>
 
-        {/* Composer */}
         <div className="border-t border-border bg-surface/60 p-3 md:p-4">
           <div className="flex items-end gap-2">
             <button
@@ -266,24 +281,22 @@ export default function ChatPage() {
 
             <button
               onClick={toggleMic}
-              title="Hablar"
+              disabled={transcribing}
+              title="Hablar (Whisper)"
               className={cn(
                 "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
-                listening ? "animate-pulse bg-danger/20 text-danger" : "text-muted-foreground hover:text-foreground"
+                recording ? "animate-pulse bg-danger/20 text-danger" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Mic className="h-5 w-5" />
+              {transcribing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
             </button>
 
-            <button
-              onClick={() => send()}
-              disabled={streaming || !input.trim()}
-              className="nova-btn-primary h-11 w-11 shrink-0 !px-0"
-            >
+            <button onClick={() => send()} disabled={streaming || !input.trim()} className="nova-btn-primary h-11 w-11 shrink-0 !px-0">
               {streaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>
-          {listening && <p className="mt-2 text-center text-xs text-danger">● Escuchando… habla ahora</p>}
+          {recording && <p className="mt-2 text-center text-xs text-danger">● Grabando… pulsa el micrófono para terminar</p>}
+          {transcribing && <p className="mt-2 text-center text-xs text-primary">Transcribiendo con Whisper…</p>}
         </div>
       </section>
     </div>
@@ -304,17 +317,19 @@ function MessageBubble({ message, streaming }: { message: ChatMessage; streaming
       </div>
       <div
         className={cn(
-          "max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+          "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
           isUser ? "bg-accent/12 text-foreground" : "glass text-foreground"
         )}
       >
-        <p className={cn("whitespace-pre-wrap", streaming && !message.content && "typing-caret")}>
-          {message.content}
-          {streaming && message.content ? <span className="typing-caret" /> : null}
-        </p>
-        {message.createdAt && (
-          <p className="mt-1.5 text-[10px] text-muted-foreground">{relativeTime(message.createdAt)}</p>
+        {isUser ? (
+          <p className="whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <>
+            <ChatMarkdown content={message.content} />
+            {streaming && <span className="typing-caret" />}
+          </>
         )}
+        {message.createdAt && <p className="mt-1.5 text-[10px] text-muted-foreground">{relativeTime(message.createdAt)}</p>}
       </div>
     </div>
   );
