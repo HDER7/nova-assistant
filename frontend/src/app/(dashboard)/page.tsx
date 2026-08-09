@@ -9,6 +9,7 @@ import {
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { StatCard } from "@/components/StatCard";
+import { Donut, Bars } from "@/components/Donut";
 import { ArcReactor } from "@/components/ArcReactor";
 import type { DashboardSummary, Task, CalendarEvent } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -58,6 +59,32 @@ export default function DashboardPage() {
         <StatCard label="Memorias" value={summary?.memories ?? 0} icon={BrainCircuit} href="/memory" />
         <StatCard label="Tareas completadas" value={summary?.tasks.done ?? 0} icon={CheckSquare} />
         <StatCard label="En progreso" value={summary?.tasks.inProgress ?? 0} icon={Sparkles} />
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="nova-card">
+          <h2 className="mb-4 font-semibold">Distribución de tareas</h2>
+          <Donut
+            centerLabel="tareas"
+            data={[
+              { label: "Por hacer", value: summary?.tasks.todo ?? 0, color: "hsl(var(--primary))" },
+              { label: "En progreso", value: summary?.tasks.inProgress ?? 0, color: "hsl(var(--warning))" },
+              { label: "Completadas", value: summary?.tasks.done ?? 0, color: "hsl(var(--success))" },
+            ]}
+          />
+        </div>
+        <div className="nova-card">
+          <h2 className="mb-4 font-semibold">Tu actividad</h2>
+          <Bars
+            data={[
+              { label: "Conversaciones", value: summary?.conversations ?? 0, color: "hsl(var(--primary))" },
+              { label: "Notas", value: summary?.notes ?? 0, color: "hsl(var(--accent))" },
+              { label: "Memorias", value: summary?.memories ?? 0, color: "hsl(var(--success))" },
+              { label: "Recordatorios", value: summary?.remindersPending ?? 0, color: "hsl(var(--warning))" },
+              { label: "Eventos", value: summary?.upcomingEvents ?? 0, color: "hsl(var(--danger))" },
+            ]}
+          />
+        </div>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">

@@ -43,6 +43,10 @@ public class Reminder {
     @Builder.Default
     private boolean completed = false;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean notified = false;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
