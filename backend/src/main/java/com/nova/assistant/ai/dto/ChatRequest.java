@@ -7,5 +7,6 @@ import java.util.UUID;
 
 public record ChatRequest(
         UUID conversationId,
-        @NotBlank @Size(max = 8000) String message
+        @NotBlank @Size(max = 8000) String message,
+        String model
 ) {}

@@ -24,9 +24,12 @@ import java.util.concurrent.Executors;
 public class AiService {
 
     private static final int MAX_TOOL_ITERATIONS = 5;
+    // Groq model pair used by the "auto" router.
+    private static final String FAST_MODEL = "llama-3.1-8b-instant";
+    private static final String STRONG_MODEL = "llama-3.3-70b-versatile";
 
-    private final AiProvider provider;        // @Primary (OpenAI-compatible or mock)
-    private final MockAiProvider fallback;    // resilience if the live call fails
+    private final AiProvider provider;
+    private final MockAiProvider fallback;
     private final AiPersistence persistence;
     private final AppProperties properties;
     private final ToolService toolService;
@@ -40,7 +43,7 @@ public class AiService {
     public ChatResponse chat(UUID userId, ChatRequest req) {
         String message = req.message().trim();
         ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
-        String answer = generateAgentic(userId, ctx.messages());
+        String answer = generateAgentic(userId, ctx.messages(), resolveModel(req.model(), message));
         MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
         return new ChatResponse(ctx.conversationId(), mr);
     }
@@ -48,76 +51,63 @@ public class AiService {
     public SseEmitter stream(UUID userId, ChatRequest req) {
         SseEmitter emitter = new SseEmitter(180_000L);
         String message = req.message().trim();
+        String model = resolveModel(req.model(), message);
         executor.execute(() -> {
             try {
                 ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
                 emitter.send(SseEmitter.event().name("meta")
                         .data(Map.of("conversationId", ctx.conversationId().toString()), MediaType.APPLICATION_JSON));
-
-                String answer = generateAgentic(userId, ctx.messages());
+                String answer = generateAgentic(userId, ctx.messages(), model);
                 for (String token : tokenize(answer)) {
-                    emitter.send(SseEmitter.event().name("token")
-                            .data(Map.of("t", token), MediaType.APPLICATION_JSON));
+                    emitter.send(SseEmitter.event().name("token").data(Map.of("t", token), MediaType.APPLICATION_JSON));
                     Thread.sleep(14);
                 }
-
                 MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
                 emitter.send(SseEmitter.event().name("done").data(mr, MediaType.APPLICATION_JSON));
                 emitter.complete();
             } catch (Exception ex) {
-                try {
-                    emitter.completeWithError(ex);
-                } catch (Exception ignored) {
-                    // client gone
-                }
+                try { emitter.completeWithError(ex); } catch (Exception ignored) { }
             }
         });
         return emitter;
     }
 
-    /** One-off completion without tools (document analysis, etc.). */
     public String oneShot(String systemPrompt, String userContent) {
-        return generate(List.of(
-                new ChatMessage("system", systemPrompt),
-                new ChatMessage("user", userContent)));
+        return generate(List.of(new ChatMessage("system", systemPrompt), new ChatMessage("user", userContent)));
     }
 
     public Map<String, Object> status() {
-        return Map.of(
-                "provider", provider.name(),
-                "live", provider.live(),
-                "model", properties.getAi().getOpenai().getModel());
+        return Map.of("provider", provider.name(), "live", provider.live(), "model", properties.getAi().getOpenai().getModel());
     }
 
-    /** Plain completion (no tools), with graceful fallback to the local brain. */
+    /** Resolves the model to use: a specific id, "auto" (fast↔strong by complexity), or default (null). */
+    private String resolveModel(String requested, String message) {
+        if (requested == null || requested.isBlank()) return null;
+        if (!requested.equalsIgnoreCase("auto")) return requested;
+        String m = message == null ? "" : message.toLowerCase();
+        boolean complex = message != null && message.length() > 480;
+        for (String k : new String[]{"código", "codigo", "refactor", "algoritmo", "script", "analiza", "depura",
+                "explica en detalle", "test", "prueba unitaria", "arquitectura", "optimiza", "vulnerab"}) {
+            if (m.contains(k)) { complex = true; break; }
+        }
+        return complex ? STRONG_MODEL : FAST_MODEL;
+    }
+
     private String generate(List<ChatMessage> messages) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
-        try {
-            return provider.complete(messages, temperature, maxTokens);
-        } catch (Exception e) {
-            return fallback.complete(messages, temperature, maxTokens);
-        }
+        try { return provider.complete(messages, temperature, maxTokens); }
+        catch (Exception e) { return fallback.complete(messages, temperature, maxTokens); }
     }
 
-    /**
-     * Agentic completion: lets the model call NOVA's tools (create task/reminder/note/
-     * event/memory, list tasks) and loops until it produces a final natural-language reply.
-     * Only the live OpenAI-compatible provider supports tools; otherwise we degrade to the
-     * local brain.
-     */
-    private String generateAgentic(UUID userId, List<ChatMessage> baseMessages) {
+    private String generateAgentic(UUID userId, List<ChatMessage> baseMessages, String model) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
 
         if (!(provider instanceof OpenAiProvider openAi)) {
-            try {
-                return provider.complete(baseMessages, temperature, maxTokens);
-            } catch (Exception e) {
-                return fallback.complete(baseMessages, temperature, maxTokens);
-            }
+            try { return provider.complete(baseMessages, temperature, maxTokens); }
+            catch (Exception e) { return fallback.complete(baseMessages, temperature, maxTokens); }
         }
-
         try {
             List<Map<String, Object>> msgs = new ArrayList<>();
             for (ChatMessage m : baseMessages) {
@@ -127,17 +117,14 @@ public class AiService {
                 msgs.add(mm);
             }
             List<Map<String, Object>> tools = toolService.toolSpecs();
-
             for (int iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-                Map<String, Object> assistant = openAi.chatRaw(msgs, tools, temperature, maxTokens);
+                Map<String, Object> assistant = openAi.chatRaw(msgs, tools, temperature, maxTokens, model);
                 Object toolCalls = assistant.get("tool_calls");
-
                 if (!(toolCalls instanceof List<?> calls) || calls.isEmpty()) {
                     Object content = assistant.get("content");
                     return content == null ? "" : content.toString().trim();
                 }
-
-                msgs.add(assistant); // assistant turn carrying the tool_calls
+                msgs.add(assistant);
                 for (Object o : calls) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> call = (Map<String, Object>) o;
@@ -147,7 +134,6 @@ public class AiService {
                     String fname = function == null ? null : String.valueOf(function.get("name"));
                     String fargs = function == null ? null : String.valueOf(function.get("arguments"));
                     String result = toolService.execute(userId, fname, fargs);
-
                     Map<String, Object> toolMsg = new HashMap<>();
                     toolMsg.put("role", "tool");
                     toolMsg.put("tool_call_id", id);
@@ -155,9 +141,7 @@ public class AiService {
                     msgs.add(toolMsg);
                 }
             }
-
-            // Safety net: force a final answer without tools.
-            Map<String, Object> finalMsg = openAi.chatRaw(msgs, null, temperature, maxTokens);
+            Map<String, Object> finalMsg = openAi.chatRaw(msgs, null, temperature, maxTokens, model);
             Object content = finalMsg.get("content");
             return content == null ? "" : content.toString().trim();
         } catch (Exception e) {
@@ -169,9 +153,7 @@ public class AiService {
         List<String> out = new ArrayList<>();
         if (text == null || text.isEmpty()) return out;
         String[] words = text.split(" ");
-        for (int i = 0; i < words.length; i++) {
-            out.add(i == words.length - 1 ? words[i] : words[i] + " ");
-        }
+        for (int i = 0; i < words.length; i++) out.add(i == words.length - 1 ? words[i] : words[i] + " ");
         return out;
     }
 }

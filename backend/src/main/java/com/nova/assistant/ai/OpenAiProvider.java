@@ -9,10 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * OpenAI-compatible Chat Completions provider (OpenAI, Groq, Gemini, Ollama, ...).
- * Supports tool/function calling via {@link #chatRaw}.
- */
+/** OpenAI-compatible provider (OpenAI, Groq, Gemini, Ollama, ...) with tool calling and per-request model override. */
 public class OpenAiProvider implements AiProvider {
 
     private final RestClient client;
@@ -20,21 +17,12 @@ public class OpenAiProvider implements AiProvider {
 
     public OpenAiProvider(RestClient.Builder builder, AppProperties.OpenAi cfg) {
         this.model = cfg.getModel();
-        this.client = builder
-                .baseUrl(cfg.getBaseUrl())
-                .defaultHeader("Authorization", "Bearer " + cfg.getApiKey())
-                .build();
+        this.client = builder.baseUrl(cfg.getBaseUrl()).defaultHeader("Authorization", "Bearer " + cfg.getApiKey()).build();
     }
 
-    @Override
-    public String name() {
-        return "openai:" + model;
-    }
-
-    @Override
-    public boolean live() {
-        return true;
-    }
+    @Override public String name() { return "openai:" + model; }
+    @Override public boolean live() { return true; }
+    public String defaultModel() { return model; }
 
     @Override
     public String complete(List<ChatMessage> messages, double temperature, int maxTokens) {
@@ -44,21 +32,16 @@ public class OpenAiProvider implements AiProvider {
             x.put("content", m.content());
             return x;
         }).toList();
-        Map<String, Object> message = chatRaw(msgs, null, temperature, maxTokens);
+        Map<String, Object> message = chatRaw(msgs, null, temperature, maxTokens, null);
         Object content = message.get("content");
         return content == null ? "" : content.toString().trim();
     }
 
-    /**
-     * Full chat completion that returns the raw assistant message (choices[0].message),
-     * which may contain "tool_calls". Pass a non-null tools list to enable function calling.
-     */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> chatRaw(List<Map<String, Object>> messages,
-                                       List<Map<String, Object>> tools,
-                                       double temperature, int maxTokens) {
+    public Map<String, Object> chatRaw(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
+                                       double temperature, int maxTokens, String modelOverride) {
         Map<String, Object> body = new HashMap<>();
-        body.put("model", model);
+        body.put("model", (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : model);
         body.put("temperature", temperature);
         body.put("max_tokens", maxTokens);
         body.put("messages", messages);
@@ -66,12 +49,8 @@ public class OpenAiProvider implements AiProvider {
             body.put("tools", tools);
             body.put("tool_choice", "auto");
         }
-        Map<String, Object> response = client.post()
-                .uri("/chat/completions")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(Map.class);
+        Map<String, Object> response = client.post().uri("/chat/completions")
+                .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(Map.class);
         if (response == null || response.get("choices") == null) {
             throw new IllegalStateException("Respuesta vacia del proveedor de IA");
         }

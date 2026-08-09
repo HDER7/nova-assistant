@@ -94,7 +94,7 @@ export interface StreamHandlers {
 }
 
 export async function streamChat(
-  body: { conversationId?: string | null; message: string },
+  body: { conversationId?: string | null; message: string; model?: string | null },
   handlers: StreamHandlers,
   retry = true
 ): Promise<void> {
@@ -154,4 +154,23 @@ function parseEvent(raw: string, handlers: StreamHandlers) {
   } catch {
     /* ignore malformed chunk */
   }
+}
+
+export async function downloadReport(title: string, content: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken;
+  const res = await fetch(`${API_URL}/api/soc/report`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ title, content }),
+  });
+  if (!res.ok) throw new Error("No se pudo generar el PDF");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(title || "informe-nova").replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

@@ -42,6 +42,8 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(false);
+  const [model, setModel] = useState("auto");
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
 
   const endRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -80,6 +82,10 @@ export default function ChatPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    api.get<{ models: { id: string; label: string }[] }>("/api/chat/models").then((r) => setModels(r.models)).catch(() => {});
+  }, []);
+
   function newConversation() {
     setActiveId(null);
     setMessages([]);
@@ -115,7 +121,7 @@ export default function ChatPage() {
 
     let finalText = "";
     await streamChat(
-      { conversationId: activeId, message: text },
+      { conversationId: activeId, message: text, model },
       {
         onMeta: (cid) => {
           if (!activeId) setActiveId(cid);
@@ -252,6 +258,20 @@ export default function ChatPage() {
         </div>
 
         <div className="border-t border-border bg-surface/60 p-3 md:p-4">
+          {models.length > 0 && (
+            <div className="mb-2 flex items-center justify-end gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Modelo</span>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="rounded-lg border border-border bg-background/60 px-2 py-1 text-xs outline-none focus:border-primary"
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <button
               onClick={() => setSpeakReplies((v) => { if (v) cancelSpeech(); return !v; })}

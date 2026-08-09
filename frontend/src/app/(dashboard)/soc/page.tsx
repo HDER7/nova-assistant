@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  ShieldAlert, Crosshair, Siren, Fish, Bug, Binary, Loader2, Copy, Check, ScanSearch,
+  ShieldAlert, Crosshair, Siren, Fish, Bug, Binary, Loader2, Copy, Check, ScanSearch, FileSearch, Download,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, downloadReport } from "@/lib/api";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
 
-type Tab = "ioc" | "triage" | "phishing" | "cve" | "decode" | "vt";
+type Tab = "ioc" | "triage" | "phishing" | "cve" | "decode" | "vt" | "file";
 
 interface IocResult {
   ipv4: string[]; domains: string[]; urls: string[]; emails: string[];
@@ -21,6 +21,7 @@ interface CveResult {
   published?: string; references: string[]; found: boolean; note?: string;
 }
 interface DecodeResult { mode: string; output: string; ok: boolean }
+interface SocFileResult { filename: string; characters: number; iocs: IocResult; triage: string }
 interface VtResult {
   indicator: string; type: string; verdict?: string;
   malicious: number; suspicious: number; harmless: number; undetected: number;
@@ -34,6 +35,7 @@ const TABS: { key: Tab; label: string; icon: typeof Crosshair }[] = [
   { key: "cve", label: "CVE", icon: Bug },
   { key: "decode", label: "Decoder", icon: Binary },
   { key: "vt", label: "Reputación (VT)", icon: ScanSearch },
+  { key: "file", label: "Análisis de archivo", icon: FileSearch },
 ];
 
 function CopyBtn({ text }: { text: string }) {
@@ -86,6 +88,8 @@ export default function SocPage() {
   const [dec, setDec] = useState<DecodeResult | null>(null);
   const [vtIn, setVtIn] = useState("");
   const [vt, setVt] = useState<VtResult | null>(null);
+  const [socFile, setSocFile] = useState<File | null>(null);
+  const [fileResult, setFileResult] = useState<SocFileResult | null>(null);
 
   async function run(fn: () => Promise<void>) {
     setLoading(true);
@@ -169,7 +173,14 @@ export default function SocPage() {
           </div>
           <div className="nova-card">
             <h3 className="mb-2 text-sm font-semibold">Análisis</h3>
-            {triage ? <p className="whitespace-pre-wrap text-sm">{triage}</p>
+            {triage ? (
+              <div className="space-y-2">
+                <p className="whitespace-pre-wrap text-sm">{triage}</p>
+                <button onClick={() => downloadReport("Triage-NOVA", triage)} className="nova-btn-ghost text-xs">
+                  <Download className="h-3.5 w-3.5" /> Descargar PDF
+                </button>
+              </div>
+            )
               : <p className="text-sm text-muted-foreground">NOVA evaluará severidad, IOCs, MITRE ATT&CK y acciones.</p>}
           </div>
         </div>
@@ -189,7 +200,14 @@ export default function SocPage() {
           </div>
           <div className="nova-card">
             <h3 className="mb-2 text-sm font-semibold">Veredicto</h3>
-            {phish ? <p className="whitespace-pre-wrap text-sm">{phish}</p>
+            {phish ? (
+              <div className="space-y-2">
+                <p className="whitespace-pre-wrap text-sm">{phish}</p>
+                <button onClick={() => downloadReport("Phishing-NOVA", phish)} className="nova-btn-ghost text-xs">
+                  <Download className="h-3.5 w-3.5" /> Descargar PDF
+                </button>
+              </div>
+            )
               : <p className="text-sm text-muted-foreground">Veredicto, nivel de riesgo, IOCs y recomendaciones.</p>}
           </div>
         </div>
@@ -289,6 +307,45 @@ export default function SocPage() {
               {vt.link && <a href={vt.link} target="_blank" rel="noreferrer" className="inline-block text-xs text-primary hover:underline">Ver en VirusTotal →</a>}
             </div>
           ) : <p className="text-sm text-danger">{vt.note}</p>)}
+        </div>
+      )}
+      {/* FILE ANALYSIS */}
+      {tab === "file" && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="nova-card space-y-3">
+            <h2 className="font-semibold">Análisis de archivo (logs)</h2>
+            <p className="text-xs text-muted-foreground">Sube un log/alerta (TXT, CSV, JSON, PDF…). NOVA extrae IOCs y hace triage con IA.</p>
+            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-background/40 px-4 py-6 text-center transition hover:border-primary/50">
+              <FileSearch className="h-6 w-6 text-primary" />
+              <span className="text-sm">{socFile ? socFile.name : "Elegir archivo de logs"}</span>
+              <input type="file" className="hidden" onChange={(e) => setSocFile(e.target.files?.[0] || null)} accept=".txt,.log,.csv,.json,.md,.xml,.pdf" />
+            </label>
+            <button disabled={loading || !socFile} className="nova-btn-primary w-full"
+              onClick={() => run(async () => { const f = new FormData(); f.append("file", socFile as File); setFileResult(await api.postForm<SocFileResult>("/api/soc/analyze-file", f)); })}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />} Analizar archivo
+            </button>
+          </div>
+          <div className="space-y-2">
+            {fileResult ? (
+              <>
+                <div className="nova-card">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold">Triage — {fileResult.filename}</h3>
+                    <button onClick={() => downloadReport(`Informe-${fileResult.filename}`, `Archivo: ${fileResult.filename}\n\n${fileResult.triage}`)} className="nova-btn-ghost text-xs">
+                      <Download className="h-3.5 w-3.5" /> PDF
+                    </button>
+                  </div>
+                  <p className="whitespace-pre-wrap text-sm">{fileResult.triage}</p>
+                </div>
+                <IocGroup title="IPv4" items={fileResult.iocs.ipv4} />
+                <IocGroup title="Dominios" items={fileResult.iocs.domains} />
+                <IocGroup title="URLs" items={fileResult.iocs.urls} />
+                <IocGroup title="SHA256" items={fileResult.iocs.sha256} />
+                <IocGroup title="MD5" items={fileResult.iocs.md5} />
+                <IocGroup title="CVEs" items={fileResult.iocs.cves} />
+              </>
+            ) : <p className="nova-card text-sm text-muted-foreground">El análisis del archivo aparecerá aquí.</p>}
+          </div>
         </div>
       )}
 

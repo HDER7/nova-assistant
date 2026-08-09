@@ -47,6 +47,11 @@ public class DocumentAnalysisService {
         return new DocumentAnalysisResponse(file.getOriginalFilename(), contentType, text.length(), analysis);
     }
 
+    public String extractPlainText(MultipartFile file) {
+        String ct = file.getContentType() == null ? "application/octet-stream" : file.getContentType();
+        return extractText(file, ct);
+    }
+
     private String extractText(MultipartFile file, String contentType) {
         try {
             if (contentType.contains("pdf") || isPdfName(file.getOriginalFilename())) {
