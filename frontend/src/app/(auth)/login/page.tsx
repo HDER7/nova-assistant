@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
@@ -13,8 +12,8 @@ export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const pushToast = useUIStore((s) => s.pushToast);
-  const [email, setEmail] = useState("demo@nova.ai");
-  const [password, setPassword] = useState("Demo12345");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,16 +69,6 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-muted-foreground">
-        ¿No tienes cuenta?{" "}
-        <Link href="/register" className="font-medium text-primary hover:underline">
-          Crear una
-        </Link>
-      </p>
-      <p className="mt-4 rounded-lg border border-border bg-muted/30 p-3 text-center text-xs text-muted-foreground">
-        Demo: <span className="font-mono text-foreground">demo@nova.ai</span> /{" "}
-        <span className="font-mono text-foreground">Demo12345</span>
-      </p>
     </div>
   );
 }

@@ -68,8 +68,10 @@ public class SecurityConfig {
         List<String> origins = Arrays.stream(properties.getCors().getAllowedOrigins().split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
-                .toList();
-        config.setAllowedOrigins(origins);
+                .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
+        if (!origins.contains("https://*.vercel.app")) origins.add("https://*.vercel.app");
+        if (!origins.contains("http://localhost:3000")) origins.add("http://localhost:3000");
+        config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
