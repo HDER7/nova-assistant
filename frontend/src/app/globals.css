@@ -33,12 +33,12 @@
 }
 
 .dark {
-  /* Dark mode = the real NOVA. Absolute black, one red. */
-  --background: 240 6% 4%;
+  /* Dark mode = the real NOVA. Navy-black canvas, one red. */
+  --background: 214 34% 6%;
   --foreground: 0 0% 92%;
-  --surface: 240 5% 7%;
-  --card: 240 5% 7%;
-  --muted: 240 4% 13%;
+  --surface: 216 22% 8%;
+  --card: 216 20% 8%;
+  --muted: 216 16% 14%;
   --muted-foreground: 240 3% 55%;
   --primary: 2 100% 45%;
   --primary-foreground: 0 0% 4%;
@@ -71,14 +71,25 @@ body {
   min-height: 100vh;
 }
 
-/* Flat tactical backdrop — solid black with a single faint red bloom top-left. */
+/* Circuit-trace backdrop — navy-black PCB with red traces and a central bloom. */
 .nova-backdrop {
   position: fixed;
   inset: 0;
   z-index: -1;
+  background-color: #06080c;
+  background-image: url("/circuit-bg.svg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+/* Light mode keeps it clean — no circuit board on bone. */
+:root .nova-backdrop {
+  background-image: none;
   background-color: hsl(var(--background));
-  background-image:
-    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.06), transparent 38%);
+}
+.dark .nova-backdrop {
+  background-color: #06080c;
+  background-image: url("/circuit-bg.svg");
 }
 
 /* Overlays: near-opaque flat panel, hairline border, minimal blur. */

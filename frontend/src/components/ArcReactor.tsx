@@ -3,12 +3,12 @@
 import { cn } from "@/lib/utils";
 
 /**
- * NOVA core mark — Batman × Yeezy.
- * A stark red square lockup: a thin bracket ring, a solid red core, and a
- * single slow sweep when active. Flat, tactical, no glow.
+ * Official NOVA / Rivas mark — Concept C (minimal Yeezy).
+ * A stark geometric "R" for Rivas with a single red accent bar.
+ * Kept under the name ArcReactor so every brand slot uses the new logo.
  */
 export function ArcReactor({
-  size = 160,
+  size = 120,
   active = false,
   className,
 }: {
@@ -16,34 +16,34 @@ export function ArcReactor({
   active?: boolean;
   className?: string;
 }) {
-  const core = Math.round(size * 0.26);
   return (
-    <div
-      className={cn("relative", className)}
-      style={{ width: size, height: size }}
+    <svg
+      viewBox="9 16 88 88"
+      width={size}
+      height={size}
+      role="img"
+      aria-label="Rivas"
+      className={cn("text-foreground", className)}
     >
-      {/* Outer bracket ring */}
-      <div className="absolute inset-0 rounded-md border border-border" />
-      {/* Rotating hairline ring — single, slow, subtle */}
-      <div className="absolute inset-[14%] rounded-full border border-primary/25 animate-spin-slow" />
-      {/* Inner square frame */}
-      <div className="absolute inset-[28%] rounded-sm border border-border" />
-      {/* Solid red core */}
-      <div
-        className={cn(
-          "absolute rounded-sm bg-primary transition-transform duration-500",
-          active ? "scale-110" : "scale-100"
-        )}
-        style={{
-          width: core,
-          height: core,
-          left: `calc(50% - ${core / 2}px)`,
-          top: `calc(50% - ${core / 2}px)`,
-        }}
+      <rect
+        x="14"
+        y="26"
+        width="6"
+        height="68"
+        fill="hsl(var(--primary))"
+        className={cn(active && "animate-pulse")}
       />
-      {active && (
-        <span className="absolute inset-[28%] rounded-sm border border-primary/50 animate-pulse-ring" />
-      )}
-    </div>
+      <g fill="currentColor" transform="translate(12 4) scale(0.92)">
+        <rect x="30" y="24" width="15" height="72" rx="2" />
+        <path
+          fillRule="evenodd"
+          d="M45 24H63c16 0 25 9 25 24s-9 24-25 24H45Zm0 14v20h17c8 0 12-4 12-10s-4-10-12-10Z"
+        />
+        <path d="M52 60h12l22 36H74Z" />
+      </g>
+    </svg>
   );
 }
+
+/** Alias for semantic clarity at new call sites. */
+export const RivasMark = ArcReactor;

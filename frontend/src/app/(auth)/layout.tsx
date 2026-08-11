@@ -6,13 +6,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-border md:grid-cols-2">
         <div className="relative hidden flex-col justify-between bg-gradient-to-br from-primary/10 via-background to-accent/10 p-10 md:flex">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 font-mono text-lg font-bold text-primary glow-text">
-              N
-            </div>
-            <span className="text-lg font-semibold tracking-wide">NOVA</span>
+            <ArcReactor size={34} />
+            <span className="text-lg font-semibold tracking-[0.24em]">NOVA</span>
           </div>
-          <div className="flex justify-center py-8">
-            <ArcReactor size={220} active />
+          <div className="flex flex-col items-center gap-5 py-8">
+            <ArcReactor size={200} active />
+            <span className="nova-label" style={{ letterSpacing: "0.42em", paddingLeft: "0.42em" }}>
+              RIVAS
+            </span>
           </div>
           <div>
             <h2 className="text-2xl font-semibold">Tu asistente personal del futuro.</h2>
