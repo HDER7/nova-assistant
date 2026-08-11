@@ -25,7 +25,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/70 px-4 backdrop-blur-xl md:px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-surface/90 px-4 backdrop-blur-md md:px-6">
       <button className="text-muted-foreground md:hidden" onClick={onMenu}>
         <Menu className="h-5 w-5" />
       </button>
@@ -33,8 +33,8 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-            status?.live ? "border-success/40 text-success" : "border-primary/40 text-primary"
+            "flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-[0.66rem] uppercase tracking-[0.14em]",
+            status?.live ? "border-success/40 text-success" : "border-primary/50 text-primary"
           )}
         >
           <span className={cn("h-1.5 w-1.5 rounded-full", status?.live ? "bg-success" : "bg-primary")} />
@@ -53,7 +53,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
 
       <button
         onClick={toggle}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background/50 text-muted-foreground hover:text-foreground"
+        className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background/50 text-muted-foreground hover:text-foreground"
         aria-label="Cambiar tema"
       >
         {theme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
@@ -61,7 +61,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
 
       <button
         onClick={onLogout}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background/50 text-muted-foreground hover:text-danger"
+        className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background/50 text-muted-foreground hover:text-danger"
         aria-label="Cerrar sesión"
       >
         <LogOut className="h-[18px] w-[18px]" />

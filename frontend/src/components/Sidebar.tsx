@@ -31,16 +31,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {open && <div className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden" onClick={onClose} />}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-border bg-surface/80 backdrop-blur-xl transition-transform md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-border bg-surface/95 backdrop-blur-md transition-transform md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex items-center justify-between px-5 py-5">
           <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-            <ArcReactor size={38} />
+            <ArcReactor size={34} />
             <div>
-              <p className="font-semibold leading-tight tracking-wide glow-text">NOVA</p>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Assistant</p>
+              <p className="text-sm font-semibold leading-tight tracking-[0.24em]">NOVA</p>
+              <p className="nova-label mt-0.5">Assistant</p>
             </div>
           </Link>
           <button className="text-muted-foreground md:hidden" onClick={onClose}>
@@ -58,22 +58,25 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+                  "relative flex items-center gap-3 rounded-md px-3 py-2.5 text-[13px] uppercase tracking-[0.12em] transition",
                   active
-                    ? "bg-primary/15 text-primary glow-border"
-                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    ? "bg-muted/50 text-foreground"
+                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
                 )}
               >
-                <Icon className="h-[18px] w-[18px]" />
+                {active && (
+                  <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 bg-primary" />
+                )}
+                <Icon className={cn("h-[18px] w-[18px]", active && "text-primary")} />
                 {item.label}
               </Link>
             );
           })}
         </nav>
 
-        <div className="m-3 rounded-xl border border-border bg-background/40 p-3">
+        <div className="m-3 rounded-md border border-border bg-background/40 p-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/15 text-sm font-semibold text-primary">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
               {(user?.displayName || "N").charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">

@@ -36,7 +36,8 @@ export default function LoginPage() {
 
   return (
     <div className="flex h-full flex-col justify-center">
-      <h1 className="text-2xl font-semibold">Iniciar sesión</h1>
+      <p className="nova-label mb-3">Secure access</p>
+      <h1 className="text-2xl font-semibold tracking-tight">Iniciar sesión</h1>
       <p className="mt-1 text-sm text-muted-foreground">Accede a tu centro de control NOVA.</p>
 
       <form onSubmit={onSubmit} className="mt-8 space-y-4">

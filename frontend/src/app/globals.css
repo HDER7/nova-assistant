@@ -2,45 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  NOVA design language — "Batman × Yeezy"
+  Near-black canvas, off-white type, a single restrained red accent (#E10600).
+  Flat surfaces, hairline borders, sharp corners, tracked uppercase labels.
+  No glow, no neon, minimal blur. Negative space does the work.
+*/
+
 :root {
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --background: 210 40% 98%;
-  --foreground: 222 47% 11%;
+  /* Light mode = warm bone / gallery white */
+  --background: 40 14% 95%;
+  --foreground: 0 0% 7%;
   --surface: 0 0% 100%;
-  --card: 0 0% 100%;
-  --muted: 214 32% 91%;
-  --muted-foreground: 215 16% 40%;
-  --primary: 190 95% 40%;
+  --card: 40 12% 98%;
+  --muted: 40 8% 90%;
+  --muted-foreground: 0 0% 38%;
+  --primary: 2 100% 44%;
   --primary-foreground: 0 0% 100%;
-  --accent: 265 84% 58%;
-  --accent-foreground: 0 0% 100%;
-  --border: 214 30% 84%;
-  --input: 214 30% 84%;
-  --ring: 190 95% 42%;
-  --danger: 0 84% 60%;
-  --success: 152 60% 40%;
-  --warning: 38 92% 48%;
+  --accent: 0 0% 12%;
+  --accent-foreground: 0 0% 98%;
+  --border: 40 6% 84%;
+  --input: 40 6% 86%;
+  --ring: 2 100% 44%;
+  --danger: 2 100% 44%;
+  --success: 150 30% 40%;
+  --warning: 36 70% 46%;
 }
 
 .dark {
-  --background: 222 47% 5%;
-  --foreground: 200 28% 92%;
-  --surface: 220 40% 9%;
-  --card: 221 39% 8%;
-  --muted: 217 33% 16%;
-  --muted-foreground: 214 18% 60%;
-  --primary: 187 100% 50%;
-  --primary-foreground: 222 47% 6%;
-  --accent: 265 90% 68%;
-  --accent-foreground: 222 47% 6%;
-  --border: 205 45% 22%;
-  --input: 217 33% 18%;
-  --ring: 187 100% 50%;
-  --danger: 0 84% 62%;
-  --success: 152 62% 48%;
-  --warning: 38 92% 55%;
+  /* Dark mode = the real NOVA. Absolute black, one red. */
+  --background: 240 6% 4%;
+  --foreground: 0 0% 92%;
+  --surface: 240 5% 7%;
+  --card: 240 5% 7%;
+  --muted: 240 4% 13%;
+  --muted-foreground: 240 3% 55%;
+  --primary: 2 100% 45%;
+  --primary-foreground: 0 0% 4%;
+  --accent: 240 4% 20%;
+  --accent-foreground: 0 0% 92%;
+  --border: 240 4% 15%;
+  --input: 240 4% 14%;
+  --ring: 2 100% 48%;
+  --danger: 2 100% 52%;
+  --success: 150 34% 46%;
+  --warning: 36 74% 52%;
 }
 
 * {
@@ -58,79 +67,86 @@ body {
   color: hsl(var(--foreground));
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.011em;
   min-height: 100vh;
 }
 
-/* Futuristic ambient grid + glow backdrop */
+/* Flat tactical backdrop — solid black with a single faint red bloom top-left. */
 .nova-backdrop {
   position: fixed;
   inset: 0;
   z-index: -1;
   background-color: hsl(var(--background));
   background-image:
-    radial-gradient(circle at 12% 18%, hsl(var(--primary) / 0.10), transparent 42%),
-    radial-gradient(circle at 88% 82%, hsl(var(--accent) / 0.10), transparent 45%),
-    linear-gradient(hsl(var(--border) / 0.25) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--border) / 0.25) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+    radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.06), transparent 38%);
 }
 
+/* Overlays: near-opaque flat panel, hairline border, minimal blur. */
 .glass {
-  background-color: hsl(var(--surface) / 0.72);
-  backdrop-filter: blur(14px);
-  border: 1px solid hsl(var(--border) / 0.8);
+  background-color: hsl(var(--surface) / 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid hsl(var(--border));
 }
 
+/* Glow helpers neutralised into flat, minimal treatments. */
 .glow-text {
-  text-shadow: 0 0 14px hsl(var(--primary) / 0.55);
+  text-shadow: none;
+}
+.glow-border {
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.55);
 }
 
-.glow-border {
-  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.35), 0 0 22px -6px hsl(var(--primary) / 0.5);
+/* Tracked uppercase micro-label — the Yeezy/fashion signature. */
+.nova-label {
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
 }
 
 .clip-hex {
   clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
 }
 
-/* Scrollbars */
+/* Scrollbars — thin, monochrome. */
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--primary) / 0.3);
-  border-radius: 9999px;
+  background: hsl(var(--border));
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--primary) / 0.5);
+  background: hsl(var(--muted-foreground) / 0.5);
 }
 
 @layer components {
   .nova-card {
-    @apply glass rounded-2xl p-5 shadow-glow;
+    @apply rounded-lg border border-border bg-card p-5;
   }
   .nova-input {
-    @apply w-full rounded-xl border border-border bg-background/60 px-4 py-2.5 text-sm
-      outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30
+    @apply w-full rounded-md border border-border bg-background/40 px-4 py-2.5 text-sm
+      outline-none transition focus:border-primary focus:ring-1 focus:ring-primary/40
       placeholder:text-muted-foreground;
   }
   .nova-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm
-      font-medium transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm
+      font-medium transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .nova-btn-primary {
-    @apply nova-btn bg-primary text-primary-foreground shadow-glow hover:brightness-110;
+    @apply nova-btn bg-primary text-primary-foreground hover:brightness-110;
   }
   .nova-btn-ghost {
-    @apply nova-btn border border-border bg-transparent text-foreground hover:bg-muted/50;
+    @apply nova-btn border border-border bg-transparent text-foreground hover:bg-muted/40;
   }
   .nova-chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-border bg-muted/40
-      px-2.5 py-1 text-xs text-muted-foreground;
+    @apply inline-flex items-center gap-1 rounded-sm border border-border bg-muted/30
+      px-2.5 py-1 text-[0.66rem] uppercase tracking-[0.14em] text-muted-foreground;
   }
 }
 

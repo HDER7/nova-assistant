@@ -36,9 +36,14 @@ const config: Config = {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      borderRadius: {
+        lg: "0.5rem",
+        xl: "0.625rem",
+        "2xl": "0.75rem",
+      },
       boxShadow: {
-        glow: "0 0 20px -2px hsl(var(--primary) / 0.45)",
-        "glow-lg": "0 0 40px -4px hsl(var(--primary) / 0.55)",
+        glow: "0 1px 2px rgb(0 0 0 / 0.4)",
+        "glow-lg": "0 2px 8px rgb(0 0 0 / 0.5)",
       },
       keyframes: {
         "pulse-ring": {

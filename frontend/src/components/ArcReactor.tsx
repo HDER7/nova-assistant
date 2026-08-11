@@ -2,7 +2,11 @@
 
 import { cn } from "@/lib/utils";
 
-/** The signature NOVA core: layered rotating rings with a pulsing center. */
+/**
+ * NOVA core mark — Batman × Yeezy.
+ * A stark red square lockup: a thin bracket ring, a solid red core, and a
+ * single slow sweep when active. Flat, tactical, no glow.
+ */
 export function ArcReactor({
   size = 160,
   active = false,
@@ -12,24 +16,33 @@ export function ArcReactor({
   active?: boolean;
   className?: string;
 }) {
+  const core = Math.round(size * 0.26);
   return (
-    <div className={cn("relative", className)} style={{ width: size, height: size }}>
-      <div className="absolute inset-0 rounded-full bg-primary/10 blur-xl" />
-      <div className="absolute inset-0 rounded-full border border-primary/30 animate-spin-slow" />
-      <div className="absolute inset-[10%] rounded-full border border-dashed border-primary/40 animate-spin-reverse" />
-      <div className="absolute inset-[22%] rounded-full border-2 border-primary/50 animate-spin-slow" />
-      <div className="absolute inset-[34%] rounded-full border border-accent/40 animate-spin-reverse" />
+    <div
+      className={cn("relative", className)}
+      style={{ width: size, height: size }}
+    >
+      {/* Outer bracket ring */}
+      <div className="absolute inset-0 rounded-md border border-border" />
+      {/* Rotating hairline ring — single, slow, subtle */}
+      <div className="absolute inset-[14%] rounded-full border border-primary/25 animate-spin-slow" />
+      {/* Inner square frame */}
+      <div className="absolute inset-[28%] rounded-sm border border-border" />
+      {/* Solid red core */}
       <div
         className={cn(
-          "absolute inset-[40%] rounded-full bg-primary shadow-glow-lg transition-all",
-          active ? "animate-pulse scale-110" : "opacity-80"
+          "absolute rounded-sm bg-primary transition-transform duration-500",
+          active ? "scale-110" : "scale-100"
         )}
+        style={{
+          width: core,
+          height: core,
+          left: `calc(50% - ${core / 2}px)`,
+          top: `calc(50% - ${core / 2}px)`,
+        }}
       />
       {active && (
-        <>
-          <span className="absolute inset-[36%] rounded-full bg-primary/40 animate-pulse-ring" />
-          <span className="absolute inset-[36%] rounded-full bg-primary/30 animate-pulse-ring [animation-delay:0.8s]" />
-        </>
+        <span className="absolute inset-[28%] rounded-sm border border-primary/50 animate-pulse-ring" />
       )}
     </div>
   );
