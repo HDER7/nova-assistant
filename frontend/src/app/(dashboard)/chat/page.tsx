@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
-  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon,
+  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon, Radio,
 } from "lucide-react";
 import { api, streamChat } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
-import { speak, cancelSpeech, ttsSupported } from "@/lib/speech";
+import { VoiceWave } from "@/components/VoiceWave";
+import { speak, cancelSpeech, ttsSupported, createRecognition, speechSupported, type SpeechRecognitionLike } from "@/lib/speech";
+import { playBlip, playListen } from "@/lib/sound";
 import type { Conversation, Message } from "@/lib/types";
 import { cn, relativeTime } from "@/lib/utils";
 
@@ -42,6 +44,7 @@ export default function ChatPage() {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
   const [model, setModel] = useState("auto");
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
 
@@ -50,7 +53,13 @@ export default function ChatPage() {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const speakRef = useRef(false);
-  speakRef.current = speakReplies;
+  speakRef.current = speakReplies || handsFree;
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const handsFreeRef = useRef(false);
+  handsFreeRef.current = handsFree;
+  const streamingRef = useRef(false);
+  streamingRef.current = streaming;
+  const sendRef = useRef<(t?: string) => void>(() => {});
 
   const loadConversations = useCallback(async () => {
     try {
@@ -110,6 +119,7 @@ export default function ChatPage() {
   async function send(textArg?: string) {
     const text = (textArg ?? input).trim();
     if (!text || streaming) return;
+    playBlip();
 
     setMessages((prev) => [
       ...prev,
@@ -154,6 +164,55 @@ export default function ChatPage() {
       }
     );
   }
+
+  sendRef.current = send;
+
+  const processTranscript = useCallback((raw: string) => {
+    let t = (raw || "").trim();
+    if (!t) return;
+    const low = t.toLowerCase();
+    // Require the wake word "nova" (e.g. "NOVA, crea una tarea…").
+    const idx = low.indexOf("nova");
+    if (idx < 0) return;
+    t = t.slice(idx + 4).replace(/^[\s,.:;!?-]+/, "").trim();
+    if (t.length < 2 || streamingRef.current) return;
+    playListen();
+    sendRef.current(t);
+  }, []);
+
+  useEffect(() => {
+    if (!handsFree) {
+      try { recognitionRef.current?.abort(); } catch { /* ignore */ }
+      recognitionRef.current = null;
+      return;
+    }
+    const rec = createRecognition(lang);
+    if (!rec) {
+      setHandsFree(false);
+      pushToast({ title: "Tu navegador no soporta reconocimiento de voz continuo", variant: "error" });
+      return;
+    }
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (event: { results: { isFinal: boolean; [i: number]: { transcript: string } }[] }) => {
+      const res = event.results;
+      const last = res[res.length - 1];
+      if (last && last.isFinal) processTranscript(last[0].transcript);
+    };
+    rec.onerror = null;
+    rec.onend = () => {
+      if (handsFreeRef.current) {
+        try { rec.start(); } catch { /* already running */ }
+      }
+    };
+    recognitionRef.current = rec;
+    try { rec.start(); playListen(); } catch { /* ignore */ }
+    return () => {
+      rec.onend = null;
+      try { rec.abort(); } catch { /* ignore */ }
+      recognitionRef.current = null;
+    };
+  }, [handsFree, lang, processTranscript, pushToast]);
 
   async function toggleMic() {
     if (recording) {
@@ -285,6 +344,18 @@ export default function ChatPage() {
               {speakReplies ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
             </button>
 
+            <button
+              onClick={() => setHandsFree((v) => !v)}
+              title={handsFree ? "Modo manos libres activo — di 'NOVA…'" : "Modo manos libres (di 'NOVA…')"}
+              className={cn(
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
+                handsFree ? "border-primary/50 bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                !speechSupported() && "hidden"
+              )}
+            >
+              <Radio className={cn("h-5 w-5", handsFree && "animate-pulse")} />
+            </button>
+
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -315,6 +386,14 @@ export default function ChatPage() {
               {streaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>
+          {handsFree && (
+            <div className="mt-2 flex flex-col items-center gap-1">
+              <VoiceWave active={handsFree} />
+              <p className="text-xs uppercase tracking-[0.14em] text-primary">
+                Escuchando — di <span className="font-semibold">“NOVA…”</span>
+              </p>
+            </div>
+          )}
           {recording && <p className="mt-2 text-center text-xs text-danger">● Grabando… pulsa el micrófono para terminar</p>}
           {transcribing && <p className="mt-2 text-center text-xs text-primary">Transcribiendo con Whisper…</p>}
         </div>

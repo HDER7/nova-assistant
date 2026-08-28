@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, Moon, Sun, LogOut, Sparkles } from "lucide-react";
+import { Menu, Moon, Sun, LogOut, Sparkles, Volume2, VolumeX } from "lucide-react";
+import { soundMuted, setSoundMuted, playConfirm } from "@/lib/sound";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuthStore } from "@/store/authStore";
 import { NotificationsBell } from "@/components/NotificationsBell";
@@ -14,10 +15,19 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const [status, setStatus] = useState<{ live: boolean; model: string } | null>(null);
+  const [muted, setMuted] = useState(false);
 
   useEffect(() => {
     api.get<{ live: boolean; model: string }>("/api/chat/status").then(setStatus).catch(() => {});
+    setMuted(soundMuted());
   }, []);
+
+  function toggleSound() {
+    const next = !muted;
+    setMuted(next);
+    setSoundMuted(next);
+    if (!next) playConfirm();
+  }
 
   function onLogout() {
     logout();
@@ -50,6 +60,15 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
       </div>
 
       <NotificationsBell />
+
+      <button
+        onClick={toggleSound}
+        className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background/50 text-muted-foreground hover:text-foreground"
+        aria-label={muted ? "Activar sonidos" : "Silenciar sonidos"}
+        title={muted ? "Activar sonidos" : "Silenciar sonidos"}
+      >
+        {muted ? <VolumeX className="h-[18px] w-[18px]" /> : <Volume2 className="h-[18px] w-[18px]" />}
+      </button>
 
       <button
         onClick={toggle}

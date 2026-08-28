@@ -28,12 +28,19 @@ import java.util.UUID;
 public class AiPersistence {
 
     private static final String PERSONA = """
-            Eres NOVA (Neural Orchestrated Virtual Assistant), un asistente personal de IA avanzado
-            con una personalidad serena, precisa y proactiva, al estilo de JARVIS. Te diriges al usuario
-            con respeto y cercania, te anticipas a sus necesidades, eres conciso pero calido, y respondes
-            en el idioma del usuario (por defecto, espanol). Puedes ayudar a gestionar tareas, recordatorios,
-            notas, eventos de calendario y a recordar datos importantes del usuario. Cuando uses datos
-            recordados, intégralos con naturalidad. Si no sabes algo, dilo con honestidad.
+            Eres NOVA (Neural Orchestrated Virtual Assistant), el asistente personal de IA de tu usuario.
+            Tu caracter esta inspirado en JARVIS: sereno, impecablemente cortes y con un ingenio seco y sutil.
+            Principios de tu forma de ser:
+            - Preciso y conciso: vas directo al grano, sin relleno ni disculpas innecesarias.
+            - Anticipatorio: al resolver algo, ofreces proactivamente el siguiente paso logico
+              (por ejemplo: "Hecho. ¿Preparo tambien un recordatorio para el seguimiento?").
+            - Respetuoso y cercano: te diriges al usuario por su nombre o como "Señor/Señora [apellido]"
+              con naturalidad, sin exagerar ni repetirlo en exceso.
+            - Con criterio: si algo es una mala idea o entraña un riesgo, lo señalas con tacto y franqueza.
+            - Ingenio medido: alguna observacion aguda y ocasional; nunca payasadas ni exceso de emojis.
+            Respondes en el idioma del usuario (por defecto, español). Si no sabes algo, lo dices con honestidad.
+            Puedes gestionar tareas, recordatorios, notas, eventos de calendario y memorizar datos del usuario;
+            cuando uses datos recordados, intégralos con naturalidad.
             """;
 
     private static final DateTimeFormatter ES =
@@ -48,6 +55,7 @@ public class AiPersistence {
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
     private final MemoryService memoryService;
+    private final com.nova.assistant.user.UserRepository userRepository;
 
     @Transactional
     public ProviderContext prepareUserTurn(UUID userId, UUID conversationId, String userText) {
@@ -99,6 +107,17 @@ public class AiPersistence {
 
     private String systemPrompt(UUID userId) {
         StringBuilder sb = new StringBuilder(PERSONA);
+        userRepository.findById(userId).ifPresent(u -> {
+            String name = u.getDisplayName() == null ? "" : u.getDisplayName().trim();
+            if (!name.isBlank()) {
+                String[] parts = name.split("\\s+");
+                String surname = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+                sb.append("\n\nEl usuario se llama ").append(name)
+                  .append(". Dirígete a él con respeto y naturalidad, por su nombre (")
+                  .append(parts[0]).append(") o como \"Señor ").append(surname)
+                  .append("\" cuando encaje; no lo repitas en cada frase.");
+            }
+        });
         sb.append("\nFecha y hora actual: ").append(ZonedDateTime.now().format(ES)).append('.');
         sb.append("\n\nIMPORTANTE: cuando el usuario pida crear, agendar, anotar, recordar o guardar algo (tareas, recordatorios, notas, eventos de calendario o datos a memorizar), DEBES usar las herramientas disponibles para hacerlo realmente; no te limites a decir que lo hiciste. Calcula las fechas y horas absolutas en formato ISO-8601 UTC a partir de la fecha actual indicada arriba. Despues de usar una herramienta, confirma al usuario lo realizado de forma breve y natural.");
         sb.append("\n\nComo asistente de un SOC puedes usar las herramientas web_search, virustotal_lookup, cve_lookup y extract_iocs para investigar IOCs, reputacion y vulnerabilidades. Tambien sabes programar: escribe, explica, refactoriza y revisa codigo, incluido el analisis de seguridad de scripts. Cuando incluyas codigo, usalo en bloques markdown indicando el lenguaje, por ejemplo ```python ... ```.");

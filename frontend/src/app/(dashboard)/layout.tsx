@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { ArcReactor } from "@/components/ArcReactor";
+import { BootSequence } from "@/components/BootSequence";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen md:pl-64">
+      <BootSequence />
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <Topbar onMenu={() => setMenuOpen(true)} />
       <main className="mx-auto max-w-6xl px-4 py-6 md:px-8">{children}</main>

@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   CheckSquare, StickyNote, BellRing, CalendarDays, MessageSquare,
-  BrainCircuit, ArrowRight, Sparkles,
+  BrainCircuit, ArrowRight, Sparkles, Volume2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { StatCard } from "@/components/StatCard";
 import { Donut, Bars } from "@/components/Donut";
 import { ArcReactor } from "@/components/ArcReactor";
+import { speak, ttsSupported } from "@/lib/speech";
+import { soundMuted } from "@/lib/sound";
 import type { DashboardSummary, Task, CalendarEvent } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
+  const lang = user?.locale === "en" ? "en-US" : "es-ES";
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -29,15 +32,64 @@ export default function DashboardPage() {
   const hour = new Date().getHours();
   const greeting = hour < 6 ? "Buenas noches" : hour < 12 ? "Buenos días" : hour < 20 ? "Buenas tardes" : "Buenas noches";
 
+  const surname = useMemo(() => {
+    const n = (user?.displayName || "").trim();
+    if (!n) return "";
+    const parts = n.split(/\s+/);
+    return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  }, [user?.displayName]);
+
+  const briefing = useMemo(() => {
+    if (!summary) return "";
+    const todo = summary.tasks.todo ?? 0;
+    const rem = summary.remindersPending ?? 0;
+    const ev = summary.upcomingEvents ?? 0;
+    const who = surname ? `, Señor ${surname}` : "";
+    const parts: string[] = [];
+    if (todo) parts.push(`${todo} ${todo === 1 ? "tarea pendiente" : "tareas pendientes"}`);
+    if (rem) parts.push(`${rem} ${rem === 1 ? "recordatorio" : "recordatorios"}`);
+    if (ev) parts.push(`${ev} ${ev === 1 ? "evento próximo" : "eventos próximos"}`);
+    const status = parts.length
+      ? `Tiene ${parts.length > 1 ? parts.slice(0, -1).join(", ") + " y " + parts[parts.length - 1] : parts[0]}.`
+      : "No hay nada urgente en su agenda.";
+    const close = parts.length ? "Cuando quiera, empezamos." : "Todo bajo control.";
+    return `${greeting}${who}. ${status} ${close}`;
+  }, [summary, surname, greeting]);
+
+  useEffect(() => {
+    if (!briefing) return;
+    let done = false;
+    try { done = sessionStorage.getItem("nova.briefed") === "1"; } catch { /* ignore */ }
+    if (done) return;
+    try { sessionStorage.setItem("nova.briefed", "1"); } catch { /* ignore */ }
+    if (ttsSupported() && !soundMuted()) {
+      const t = window.setTimeout(() => speak(briefing, lang), 2400);
+      return () => clearTimeout(t);
+    }
+  }, [briefing, lang]);
+
   return (
     <div className="space-y-6">
       <section className="nova-card relative flex flex-col items-start justify-between gap-6 overflow-hidden md:flex-row md:items-center">
         <div className="relative z-10">
-          <p className="text-sm text-muted-foreground">{greeting},</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">{user?.displayName || "Comandante"}</h1>
-          <p className="mt-2 max-w-md text-sm text-muted-foreground">
-            NOVA está operativa y monitorizando tu centro de control. ¿En qué trabajamos hoy?
-          </p>
+          <p className="nova-label">NOVA · en línea</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            {greeting}{surname ? `, Señor ${surname}` : ""}
+          </h1>
+          <div className="mt-2 flex max-w-md items-start gap-2">
+            <p className="text-sm text-muted-foreground">
+              {briefing || "NOVA está operativa y monitorizando tu centro de control."}
+            </p>
+            {briefing && ttsSupported() && (
+              <button
+                onClick={() => speak(briefing, lang)}
+                title="Reproducir informe"
+                className="mt-0.5 shrink-0 text-muted-foreground transition hover:text-primary"
+              >
+                <Volume2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <div className="mt-5 flex flex-wrap gap-3">
             <Link href="/chat" className="nova-btn-primary">
               <MessageSquare className="h-4 w-4" /> Hablar con NOVA
