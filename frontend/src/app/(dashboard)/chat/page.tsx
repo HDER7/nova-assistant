@@ -10,7 +10,7 @@ import { useUIStore } from "@/store/uiStore";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { VoiceWave } from "@/components/VoiceWave";
-import { speak, cancelSpeech, ttsSupported, createRecognition, speechSupported, type SpeechRecognitionLike } from "@/lib/speech";
+import { speak, cancelSpeech, ttsSupported, preloadVoices } from "@/lib/speech";
 import { playBlip, playListen } from "@/lib/sound";
 import type { Conversation, Message } from "@/lib/types";
 import { cn, relativeTime } from "@/lib/utils";
@@ -23,6 +23,15 @@ interface ChatMessage {
 }
 
 const STREAMING_ID = "__streaming__";
+
+/** Pick a MediaRecorder mime type the current browser actually supports. */
+function pickAudioMime(): string {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+  for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg"]) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
 const SUGGESTIONS = [
   "Recuerda que prefiero los informes en inglés",
   "¿Qué reputación tiene 8.8.8.8 en VirusTotal?",
@@ -45,6 +54,8 @@ export default function ChatPage() {
   const [transcribing, setTranscribing] = useState(false);
   const [speakReplies, setSpeakReplies] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
+  const [voiceOk, setVoiceOk] = useState(false);
+  const [hfAnalyser, setHfAnalyser] = useState<AnalyserNode | null>(null);
   const [model, setModel] = useState("auto");
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
 
@@ -54,12 +65,44 @@ export default function ChatPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const speakRef = useRef(false);
   speakRef.current = speakReplies || handsFree;
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const handsFreeRef = useRef(false);
   handsFreeRef.current = handsFree;
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
   const sendRef = useRef<(t?: string) => void>(() => {});
+  const speakingRef = useRef(false);
+  const cooldownRef = useRef(0);
+
+  // Hands-free VAD (voice activity detection) engine — works in any browser via MediaRecorder + Whisper.
+  const hfStreamRef = useRef<MediaStream | null>(null);
+  const hfCtxRef = useRef<AudioContext | null>(null);
+  const hfRecRef = useRef<MediaRecorder | null>(null);
+  const hfChunksRef = useRef<Blob[]>([]);
+  const hfRafRef = useRef<number>(0);
+  const hfStateRef = useRef<"idle" | "listening" | "recording" | "busy">("idle");
+  const speechStartRef = useRef(0);
+  const silenceStartRef = useRef(0);
+  const hfMimeRef = useRef<string>("");
+
+  useEffect(() => {
+    preloadVoices();
+    setVoiceOk(
+      typeof navigator !== "undefined" &&
+        !!navigator.mediaDevices?.getUserMedia &&
+        typeof MediaRecorder !== "undefined"
+    );
+  }, []);
+
+  const speakReply = useCallback((text: string) => {
+    const resume = () => {
+      speakingRef.current = false;
+      cooldownRef.current = Date.now() + 600; // ignore the tail NOVA just spoke
+      if (handsFreeRef.current && hfStateRef.current === "busy") hfStateRef.current = "listening";
+    };
+    if (!text) { resume(); return; }
+    speakingRef.current = true;
+    speak(text, lang, resume);
+  }, [lang]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -151,7 +194,7 @@ export default function ChatPage() {
           );
           setStreaming(false);
           loadConversations();
-          if (speakRef.current) speak(done.content || finalText, lang);
+          if (speakRef.current) speakReply(done.content || finalText);
         },
         onError: () => {
           setMessages((prev) =>
@@ -167,52 +210,130 @@ export default function ChatPage() {
 
   sendRef.current = send;
 
-  const processTranscript = useCallback((raw: string) => {
-    let t = (raw || "").trim();
-    if (!t) return;
-    const low = t.toLowerCase();
-    // Require the wake word "nova" (e.g. "NOVA, crea una tarea…").
-    const idx = low.indexOf("nova");
-    if (idx < 0) return;
-    t = t.slice(idx + 4).replace(/^[\s,.:;!?-]+/, "").trim();
-    if (t.length < 2 || streamingRef.current) return;
-    playListen();
-    sendRef.current(t);
+  const transcribe = useCallback(async (blob: Blob): Promise<string> => {
+    if (!blob || blob.size < 1400) return "";
+    const mime = hfMimeRef.current || blob.type || "audio/webm";
+    const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
+    const form = new FormData();
+    form.append("file", blob, `audio.${ext}`);
+    form.append("language", sttLang);
+    try {
+      const res = await api.postForm<{ text: string }>("/api/voice/transcribe", form);
+      return (res.text || "").trim();
+    } catch {
+      return "";
+    }
+  }, [sttLang]);
+
+  const stopHandsFree = useCallback(() => {
+    cancelAnimationFrame(hfRafRef.current);
+    try { if (hfRecRef.current?.state === "recording") hfRecRef.current.stop(); } catch { /* ignore */ }
+    hfRecRef.current = null;
+    hfStreamRef.current?.getTracks().forEach((t) => t.stop());
+    hfStreamRef.current = null;
+    try { void hfCtxRef.current?.close(); } catch { /* ignore */ }
+    hfCtxRef.current = null;
+    hfStateRef.current = "idle";
+    setHfAnalyser(null);
   }, []);
 
+  // Browser-agnostic hands-free: mic + voice-activity detection + Whisper transcription.
   useEffect(() => {
-    if (!handsFree) {
-      try { recognitionRef.current?.abort(); } catch { /* ignore */ }
-      recognitionRef.current = null;
-      return;
-    }
-    const rec = createRecognition(lang);
-    if (!rec) {
-      setHandsFree(false);
-      pushToast({ title: "Tu navegador no soporta reconocimiento de voz continuo", variant: "error" });
-      return;
-    }
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.onresult = (event: { results: { isFinal: boolean; [i: number]: { transcript: string } }[] }) => {
-      const res = event.results;
-      const last = res[res.length - 1];
-      if (last && last.isFinal) processTranscript(last[0].transcript);
-    };
-    rec.onerror = null;
-    rec.onend = () => {
-      if (handsFreeRef.current) {
-        try { rec.start(); } catch { /* already running */ }
+    if (!handsFree) { stopHandsFree(); return; }
+    let cancelled = false;
+
+    (async () => {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      } catch {
+        pushToast({ title: "No se pudo acceder al micrófono", variant: "error" });
+        setHandsFree(false);
+        return;
       }
-    };
-    recognitionRef.current = rec;
-    try { rec.start(); playListen(); } catch { /* ignore */ }
-    return () => {
-      rec.onend = null;
-      try { rec.abort(); } catch { /* ignore */ }
-      recognitionRef.current = null;
-    };
-  }, [handsFree, lang, processTranscript, pushToast]);
+      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      hfStreamRef.current = stream;
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new AC();
+      hfCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      setHfAnalyser(analyser);
+      hfMimeRef.current = pickAudioMime();
+      hfStateRef.current = "listening";
+
+      const buf = new Uint8Array(analyser.fftSize);
+      const SPEECH_ON = 0.05;
+      const SPEECH_OFF = 0.03;
+      const SILENCE_MS = 850;
+      const MAX_MS = 12000;
+
+      const startUtterance = () => {
+        try {
+          hfChunksRef.current = [];
+          const rec = hfMimeRef.current
+            ? new MediaRecorder(stream, { mimeType: hfMimeRef.current })
+            : new MediaRecorder(stream);
+          rec.ondataavailable = (e) => { if (e.data.size > 0) hfChunksRef.current.push(e.data); };
+          rec.onstop = async () => {
+            const blob = new Blob(hfChunksRef.current, { type: hfMimeRef.current || "audio/webm" });
+            const text = await transcribe(blob);
+            if (!handsFreeRef.current) return;
+            let t = text;
+            if (t && t.length > 1) {
+              const low = t.toLowerCase();
+              const idx = low.indexOf("nova");
+              if (idx >= 0 && idx < 6) t = t.slice(idx + 4).replace(/^[\s,.:;!?-]+/, "").trim();
+            }
+            if (t && t.length > 1) { playListen(); sendRef.current(t); }
+            else hfStateRef.current = "listening";
+          };
+          rec.start();
+          hfRecRef.current = rec;
+        } catch {
+          hfStateRef.current = "listening";
+        }
+      };
+
+      const endUtterance = () => {
+        hfStateRef.current = "busy";
+        try { if (hfRecRef.current?.state === "recording") hfRecRef.current.stop(); } catch { /* ignore */ }
+      };
+
+      const frame = () => {
+        hfRafRef.current = requestAnimationFrame(frame);
+        if (hfStateRef.current === "busy") return;
+        if (streamingRef.current || speakingRef.current) return;
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; sum += x * x; }
+        const rms = Math.sqrt(sum / buf.length);
+        const now = performance.now();
+
+        if (hfStateRef.current === "listening") {
+          if (rms > SPEECH_ON && now > cooldownRef.current) {
+            speechStartRef.current = now;
+            silenceStartRef.current = 0;
+            hfStateRef.current = "recording";
+            startUtterance();
+          }
+        } else if (hfStateRef.current === "recording") {
+          if (rms < SPEECH_OFF) {
+            if (!silenceStartRef.current) silenceStartRef.current = now;
+            else if (now - silenceStartRef.current > SILENCE_MS) endUtterance();
+          } else {
+            silenceStartRef.current = 0;
+          }
+          if (now - speechStartRef.current > MAX_MS) endUtterance();
+        }
+      };
+      hfRafRef.current = requestAnimationFrame(frame);
+    })();
+
+    return () => { cancelled = true; stopHandsFree(); };
+  }, [handsFree, transcribe, stopHandsFree, pushToast]);
 
   async function toggleMic() {
     if (recording) {
@@ -346,11 +467,11 @@ export default function ChatPage() {
 
             <button
               onClick={() => setHandsFree((v) => !v)}
-              title={handsFree ? "Modo manos libres activo — di 'NOVA…'" : "Modo manos libres (di 'NOVA…')"}
+              title={handsFree ? "Manos libres activo — habla con naturalidad" : "Modo manos libres (conversación por voz)"}
               className={cn(
                 "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
                 handsFree ? "border-primary/50 bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                !speechSupported() && "hidden"
+                !voiceOk && "hidden"
               )}
             >
               <Radio className={cn("h-5 w-5", handsFree && "animate-pulse")} />
@@ -388,9 +509,9 @@ export default function ChatPage() {
           </div>
           {handsFree && (
             <div className="mt-2 flex flex-col items-center gap-1">
-              <VoiceWave active={handsFree} />
+              <VoiceWave active={handsFree} analyser={hfAnalyser} />
               <p className="text-xs uppercase tracking-[0.14em] text-primary">
-                Escuchando — di <span className="font-semibold">“NOVA…”</span>
+                {streaming || transcribing ? "Procesando…" : "Escuchando — habla con naturalidad"}
               </p>
             </div>
           )}

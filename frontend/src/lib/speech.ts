@@ -41,20 +41,49 @@ export function ttsSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
-export function speak(text: string, lang = "es-ES"): void {
-  if (!ttsSupported() || !text) return;
+/** Warm up the voice list (Chrome loads it asynchronously). Call once on mount. */
+export function preloadVoices(): void {
+  if (!ttsSupported()) return;
+  try {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", () => {
+      window.speechSynthesis.getVoices();
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export function speak(text: string, lang = "es-ES", onEnd?: () => void): void {
+  if (!ttsSupported() || !text) {
+    onEnd?.();
+    return;
+  }
   const synth = window.speechSynthesis;
   synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = lang;
   utterance.rate = 1.02;
   utterance.pitch = 1.0;
+  const base = lang.slice(0, 2);
   const voices = synth.getVoices();
   const preferred =
-    voices.find((v) => v.lang.startsWith("es") && /google|microsoft|nova|female/i.test(v.name)) ||
-    voices.find((v) => v.lang.startsWith("es"));
+    voices.find((v) => v.lang.startsWith(base) && /google|microsoft|nova|helena|sabina|female/i.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith(base));
   if (preferred) utterance.voice = preferred;
+  if (onEnd) {
+    utterance.onend = onEnd;
+    utterance.onerror = onEnd;
+  }
   synth.speak(utterance);
+  // Chrome occasionally parks the queue; nudge it back to playing.
+  window.setTimeout(() => {
+    try {
+      if (synth.paused) synth.resume();
+    } catch {
+      /* ignore */
+    }
+  }, 250);
 }
 
 export function cancelSpeech(): void {
