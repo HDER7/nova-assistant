@@ -9,6 +9,7 @@ import com.nova.assistant.conversation.dto.MessageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
@@ -33,6 +34,23 @@ public class AiService {
     private final AiPersistence persistence;
     private final AppProperties properties;
     private final ToolService toolService;
+    private final RestClient.Builder restClientBuilder;
+
+    /** Lazily-built local engine (OpenJarvis/Ollama), created on first use from config. */
+    private volatile OpenAiProvider localEngine;
+
+    /** A resolved inference target: which OpenAI-compatible engine + which model id. */
+    private record Engine(OpenAiProvider openAi, String model, boolean local) {}
+
+    private OpenAiProvider local() {
+        OpenAiProvider e = localEngine;
+        if (e == null) {
+            AppProperties.Local l = properties.getAi().getLocal();
+            e = new OpenAiProvider(restClientBuilder, l.getBaseUrl(), l.getApiKey(), l.getModel());
+            localEngine = e;
+        }
+        return e;
+    }
 
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "nova-sse");
@@ -43,7 +61,7 @@ public class AiService {
     public ChatResponse chat(UUID userId, ChatRequest req) {
         String message = req.message().trim();
         ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
-        String answer = generateAgentic(userId, ctx.messages(), resolveModel(req.model(), message));
+        String answer = generateAgentic(userId, ctx.messages(), resolveEngine(req.model(), message));
         MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
         return new ChatResponse(ctx.conversationId(), mr);
     }
@@ -51,13 +69,13 @@ public class AiService {
     public SseEmitter stream(UUID userId, ChatRequest req) {
         SseEmitter emitter = new SseEmitter(180_000L);
         String message = req.message().trim();
-        String model = resolveModel(req.model(), message);
+        Engine engine = resolveEngine(req.model(), message);
         executor.execute(() -> {
             try {
                 ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
                 emitter.send(SseEmitter.event().name("meta")
                         .data(Map.of("conversationId", ctx.conversationId().toString()), MediaType.APPLICATION_JSON));
-                String answer = generateAgentic(userId, ctx.messages(), model);
+                String answer = generateAgentic(userId, ctx.messages(), engine);
                 for (String token : tokenize(answer)) {
                     emitter.send(SseEmitter.event().name("token").data(Map.of("t", token), MediaType.APPLICATION_JSON));
                     Thread.sleep(14);
@@ -77,7 +95,35 @@ public class AiService {
     }
 
     public Map<String, Object> status() {
-        return Map.of("provider", provider.name(), "live", provider.live(), "model", properties.getAi().getOpenai().getModel());
+        AppProperties.Local local = properties.getAi().getLocal();
+        Map<String, Object> localInfo = new HashMap<>();
+        localInfo.put("enabled", local.isEnabled());
+        localInfo.put("label", local.getLabel());
+        localInfo.put("baseUrl", local.getBaseUrl());
+        localInfo.put("reachable", local.isEnabled() && local().reachable());
+        Map<String, Object> out = new HashMap<>();
+        out.put("provider", provider.name());
+        out.put("live", provider.live());
+        out.put("model", properties.getAi().getOpenai().getModel());
+        out.put("local", localInfo);
+        return out;
+    }
+
+    /** Chooses which engine (cloud primary vs. local OpenJarvis) and model id to use for this request. */
+    private Engine resolveEngine(String requested, String message) {
+        String r = requested == null ? "" : requested.trim();
+        boolean wantsLocal = r.equalsIgnoreCase("local")
+                || r.equalsIgnoreCase("openjarvis")
+                || r.toLowerCase().startsWith("local:");
+        if (wantsLocal && properties.getAi().getLocal().isEnabled()) {
+            String sub = r.contains(":") ? r.substring(r.indexOf(':') + 1).trim() : "";
+            String model = (sub.isBlank() || sub.equalsIgnoreCase("auto"))
+                    ? (local().defaultModel().isBlank() ? null : local().defaultModel())
+                    : sub;
+            return new Engine(local(), model, true);
+        }
+        OpenAiProvider cloud = (provider instanceof OpenAiProvider o) ? o : null;
+        return new Engine(cloud, resolveModel(requested, message), false);
     }
 
     /** Resolves the model to use: a specific id, "auto" (fast↔strong by complexity), or default (null). */
@@ -100,11 +146,13 @@ public class AiService {
         catch (Exception e) { return fallback.complete(messages, temperature, maxTokens); }
     }
 
-    private String generateAgentic(UUID userId, List<ChatMessage> baseMessages, String model) {
+    private String generateAgentic(UUID userId, List<ChatMessage> baseMessages, Engine engine) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
+        String model = engine.model();
+        OpenAiProvider openAi = engine.openAi();
 
-        if (!(provider instanceof OpenAiProvider openAi)) {
+        if (openAi == null) {
             try { return provider.complete(baseMessages, temperature, maxTokens); }
             catch (Exception e) { return fallback.complete(baseMessages, temperature, maxTokens); }
         }

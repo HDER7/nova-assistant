@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, User as UserIcon, Palette, Loader2 } from "lucide-react";
+import { Save, User as UserIcon, Palette, Loader2, Cpu, Cloud } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { useTheme } from "@/providers/ThemeProvider";
 import type { User } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
+
+type EngineStatus = {
+  provider: string;
+  live: boolean;
+  model: string;
+  local: { enabled: boolean; label: string; baseUrl: string; reachable: boolean };
+};
 
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore();
@@ -21,6 +28,7 @@ export default function SettingsPage() {
   const [persona, setPersona] = useState("NOVA");
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [engine, setEngine] = useState<EngineStatus | null>(null);
 
   useEffect(() => {
     api.get<User>("/api/users/me").then((u) => {
@@ -31,6 +39,7 @@ export default function SettingsPage() {
       setLocale(u.locale);
       setPersona(u.persona);
     }).catch(() => {});
+    api.get<EngineStatus>("/api/chat/status").then(setEngine).catch(() => {});
   }, [setUser]);
 
   async function saveProfile(e: React.FormEvent) {
@@ -115,6 +124,44 @@ export default function SettingsPage() {
           </button>
         </form>
       </div>
+
+      <section className="nova-card space-y-4">
+        <h2 className="flex items-center gap-2 font-semibold"><Cpu className="h-4 w-4 text-primary" /> Motor de IA</h2>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-md border border-border bg-background/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm"><Cloud className="h-4 w-4 text-muted-foreground" /> Nube</span>
+              <span className={cn("nova-chip", engine?.live ? "border-success/40 text-success" : "text-muted-foreground")}>
+                {engine?.live ? "En línea" : "Mock"}
+              </span>
+            </div>
+            <p className="mt-2 truncate text-xs text-muted-foreground">{engine?.provider ?? "—"}</p>
+          </div>
+
+          <div className="rounded-md border border-border bg-background/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm"><Cpu className="h-4 w-4 text-muted-foreground" /> {engine?.local.label ?? "Local (OpenJarvis)"}</span>
+              <span className={cn("nova-chip", engine?.local.reachable ? "border-success/40 text-success" : "border-primary/40 text-primary")}>
+                {engine?.local.reachable ? "En línea" : "Sin conexión"}
+              </span>
+            </div>
+            <p className="mt-2 truncate font-mono text-xs text-muted-foreground">{engine?.local.baseUrl ?? "http://localhost:8000/v1"}</p>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-background/40 p-3 text-xs leading-relaxed text-muted-foreground">
+          <p className="mb-1 font-medium text-foreground">Cerebro local — 100% privado y offline</p>
+          <p>
+            Selecciona <span className="text-foreground">“{engine?.local.label ?? "Local (OpenJarvis)"}”</span> en el
+            desplegable de modelo del chat para que la inferencia corra en tu propia máquina, sin enviar datos a la nube.
+            Levanta el motor con <span className="font-mono text-foreground">jarvis serve --port 8000</span> (OpenJarvis)
+            o apunta <span className="font-mono text-foreground">NOVA_AI_LOCAL_BASE_URL</span> a tu Ollama
+            (<span className="font-mono text-foreground">http://localhost:11434/v1</span>). Las herramientas, SOC y memoria
+            de NOVA siguen funcionando igual.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }

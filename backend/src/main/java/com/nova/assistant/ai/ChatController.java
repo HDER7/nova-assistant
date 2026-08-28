@@ -11,6 +11,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,12 +41,18 @@ public class ChatController {
 
     @GetMapping("/models")
     public Map<String, Object> models() {
-        return Map.of(
-                "default", properties.getAi().getOpenai().getModel(),
-                "models", List.of(
-                        Map.of("id", "auto", "label", "Auto (rápido ↔ potente)"),
-                        Map.of("id", "llama-3.3-70b-versatile", "label", "Llama 3.3 70B (potente)"),
-                        Map.of("id", "llama-3.1-8b-instant", "label", "Llama 3.1 8B (rápido)"),
-                        Map.of("id", "openai/gpt-oss-120b", "label", "GPT-OSS 120B")));
+        List<Map<String, String>> models = new ArrayList<>(List.of(
+                Map.of("id", "auto", "label", "Auto (rápido ↔ potente)"),
+                Map.of("id", "llama-3.3-70b-versatile", "label", "Llama 3.3 70B (potente)"),
+                Map.of("id", "llama-3.1-8b-instant", "label", "Llama 3.1 8B (rápido)"),
+                Map.of("id", "openai/gpt-oss-120b", "label", "GPT-OSS 120B")));
+        AppProperties.Local local = properties.getAi().getLocal();
+        if (local.isEnabled()) {
+            models.add(Map.of("id", "local", "label", local.getLabel() + " · privado/offline"));
+        }
+        Map<String, Object> out = new HashMap<>();
+        out.put("default", properties.getAi().getOpenai().getModel());
+        out.put("models", models);
+        return out;
     }
 }

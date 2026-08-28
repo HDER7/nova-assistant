@@ -16,13 +16,29 @@ public class OpenAiProvider implements AiProvider {
     private final String model;
 
     public OpenAiProvider(RestClient.Builder builder, AppProperties.OpenAi cfg) {
-        this.model = cfg.getModel();
-        this.client = builder.baseUrl(cfg.getBaseUrl()).defaultHeader("Authorization", "Bearer " + cfg.getApiKey()).build();
+        this(builder, cfg.getBaseUrl(), cfg.getApiKey(), cfg.getModel());
     }
 
-    @Override public String name() { return "openai:" + model; }
+    /** Generic constructor for any OpenAI-compatible endpoint (OpenAI, Groq, OpenJarvis, Ollama, ...). */
+    public OpenAiProvider(RestClient.Builder builder, String baseUrl, String apiKey, String model) {
+        this.model = model == null ? "" : model;
+        this.client = builder.baseUrl(baseUrl)
+                .defaultHeader("Authorization", "Bearer " + (apiKey == null ? "" : apiKey)).build();
+    }
+
+    @Override public String name() { return "openai:" + (model.isBlank() ? "auto" : model); }
     @Override public boolean live() { return true; }
     public String defaultModel() { return model; }
+
+    /** Lightweight reachability probe (GET /models). Returns true if the endpoint answers. */
+    public boolean reachable() {
+        try {
+            client.get().uri("/models").retrieve().body(Map.class);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @Override
     public String complete(List<ChatMessage> messages, double temperature, int maxTokens) {
