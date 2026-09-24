@@ -41,11 +41,17 @@ public class ChatController {
 
     @GetMapping("/models")
     public Map<String, Object> models() {
-        List<Map<String, String>> models = new ArrayList<>(List.of(
-                Map.of("id", "auto", "label", "Auto (rápido ↔ potente)"),
-                Map.of("id", "llama-3.3-70b-versatile", "label", "Llama 3.3 70B (potente)"),
-                Map.of("id", "llama-3.1-8b-instant", "label", "Llama 3.1 8B (rápido)"),
-                Map.of("id", "openai/gpt-oss-120b", "label", "GPT-OSS 120B")));
+        List<Map<String, String>> models = new ArrayList<>();
+        models.add(Map.of("id", "auto", "label", "Auto (rápido ↔ potente)"));
+        // Catalog comes from config (NOVA_AI_MODELS_CATALOG) so retired provider models can be swapped without code changes.
+        for (String entry : properties.getAi().getModels().getCatalog().split(",")) {
+            String e = entry.trim();
+            if (e.isEmpty()) continue;
+            int bar = e.indexOf('|');
+            String id = bar > 0 ? e.substring(0, bar).trim() : e;
+            String label = bar > 0 ? e.substring(bar + 1).trim() : e;
+            if (!id.isEmpty()) models.add(Map.of("id", id, "label", label));
+        }
         AppProperties.Local local = properties.getAi().getLocal();
         if (local.isEnabled()) {
             models.add(Map.of("id", "local", "label", local.getLabel() + " · privado/offline"));

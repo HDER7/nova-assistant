@@ -23,6 +23,14 @@ services:
         value: llama-3.3-70b-versatile
       - key: NOVA_AI_OPENAI_API_KEY
         sync: false
+      # Local brain (OpenJarvis/Ollama) can't be reached from Render's cloud — keep it off here.
+      - key: NOVA_AI_LOCAL_ENABLED
+        value: "false"
+      # --- Hardening ---
+      - key: NOVA_AUTH_REGISTRATION_ENABLED
+        value: "false"
+      - key: NOVA_RATE_LIMIT_ENABLED
+        value: "true"
       # --- VirusTotal ---
       - key: NOVA_SOC_VIRUSTOTAL_API_KEY
         sync: false

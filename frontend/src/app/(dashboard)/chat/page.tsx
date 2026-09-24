@@ -79,7 +79,8 @@ export default function ChatPage() {
   const hfRecRef = useRef<MediaRecorder | null>(null);
   const hfChunksRef = useRef<Blob[]>([]);
   const hfRafRef = useRef<number>(0);
-  const hfStateRef = useRef<"idle" | "listening" | "recording" | "busy">("idle");
+  const hfStateRef = useRef<"idle" | "calibrating" | "listening" | "recording" | "busy">("idle");
+  const [hfCalibrating, setHfCalibrating] = useState(false);
   const speechStartRef = useRef(0);
   const silenceStartRef = useRef(0);
   const hfMimeRef = useRef<string>("");
@@ -262,13 +263,27 @@ export default function ChatPage() {
       source.connect(analyser);
       setHfAnalyser(analyser);
       hfMimeRef.current = pickAudioMime();
-      hfStateRef.current = "listening";
 
       const buf = new Uint8Array(analyser.fftSize);
-      const SPEECH_ON = 0.05;
-      const SPEECH_OFF = 0.03;
       const SILENCE_MS = 850;
       const MAX_MS = 12000;
+      const MIN_VOICED_MS = 300; // below this it was a cough/click, not a sentence → don't spend Whisper quota
+      const CALIBRATE_MS = 800;
+      // Thresholds adapt to the room: calibrated from the noise floor, then tracked slowly.
+      let noiseFloor = 0.01;
+      let speechOn = 0.05;
+      let speechOff = 0.03;
+      const retune = () => {
+        speechOn = Math.min(0.2, Math.max(0.035, noiseFloor * 3.2));
+        speechOff = Math.min(0.14, Math.max(0.02, noiseFloor * 1.9));
+      };
+      const calStart = performance.now();
+      const calSamples: number[] = [];
+      let voicedMs = 0;
+      let lastFrame = performance.now();
+      let discard = false;
+      hfStateRef.current = "calibrating";
+      setHfCalibrating(true);
 
       const startUtterance = () => {
         try {
@@ -278,6 +293,7 @@ export default function ChatPage() {
             : new MediaRecorder(stream);
           rec.ondataavailable = (e) => { if (e.data.size > 0) hfChunksRef.current.push(e.data); };
           rec.onstop = async () => {
+            if (discard) { discard = false; hfStateRef.current = "listening"; return; }
             const blob = new Blob(hfChunksRef.current, { type: hfMimeRef.current || "audio/webm" });
             const text = await transcribe(blob);
             if (!handsFreeRef.current) return;
@@ -298,29 +314,51 @@ export default function ChatPage() {
       };
 
       const endUtterance = () => {
+        discard = voicedMs < MIN_VOICED_MS;
         hfStateRef.current = "busy";
         try { if (hfRecRef.current?.state === "recording") hfRecRef.current.stop(); } catch { /* ignore */ }
       };
 
       const frame = () => {
         hfRafRef.current = requestAnimationFrame(frame);
+        const now = performance.now();
+        const dt = now - lastFrame;
+        lastFrame = now;
         if (hfStateRef.current === "busy") return;
         if (streamingRef.current || speakingRef.current) return;
         analyser.getByteTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; sum += x * x; }
         const rms = Math.sqrt(sum / buf.length);
-        const now = performance.now();
+
+        if (hfStateRef.current === "calibrating") {
+          calSamples.push(rms);
+          if (now - calStart > CALIBRATE_MS) {
+            const sorted = [...calSamples].sort((a, b) => a - b);
+            noiseFloor = sorted[Math.floor(sorted.length * 0.6)] || 0.01; // robust to a stray spike
+            retune();
+            hfStateRef.current = "listening";
+            setHfCalibrating(false);
+            playListen();
+          }
+          return;
+        }
 
         if (hfStateRef.current === "listening") {
-          if (rms > SPEECH_ON && now > cooldownRef.current) {
+          if (rms > speechOn && now > cooldownRef.current) {
             speechStartRef.current = now;
             silenceStartRef.current = 0;
+            voicedMs = 0;
             hfStateRef.current = "recording";
             startUtterance();
+          } else if (rms < speechOn) {
+            // Slowly follow the room's background noise (fan, AC, street).
+            noiseFloor = noiseFloor * 0.995 + rms * 0.005;
+            retune();
           }
         } else if (hfStateRef.current === "recording") {
-          if (rms < SPEECH_OFF) {
+          if (rms > speechOff) voicedMs += dt;
+          if (rms < speechOff) {
             if (!silenceStartRef.current) silenceStartRef.current = now;
             else if (now - silenceStartRef.current > SILENCE_MS) endUtterance();
           } else {
@@ -332,7 +370,7 @@ export default function ChatPage() {
       hfRafRef.current = requestAnimationFrame(frame);
     })();
 
-    return () => { cancelled = true; stopHandsFree(); };
+    return () => { cancelled = true; setHfCalibrating(false); stopHandsFree(); };
   }, [handsFree, transcribe, stopHandsFree, pushToast]);
 
   async function toggleMic() {
@@ -511,7 +549,7 @@ export default function ChatPage() {
             <div className="mt-2 flex flex-col items-center gap-1">
               <VoiceWave active={handsFree} analyser={hfAnalyser} />
               <p className="text-xs uppercase tracking-[0.14em] text-primary">
-                {streaming || transcribing ? "Procesando…" : "Escuchando — habla con naturalidad"}
+                {hfCalibrating ? "Calibrando ruido ambiente… silencio un momento" : streaming || transcribing ? "Procesando…" : "Escuchando — habla con naturalidad"}
               </p>
             </div>
           )}

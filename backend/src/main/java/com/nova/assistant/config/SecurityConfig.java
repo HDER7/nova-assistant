@@ -48,6 +48,8 @@ public class SecurityConfig {
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e.authenticationEntryPoint(
                         new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .addFilterBefore(new com.nova.assistant.security.RateLimitFilter(properties),
+                        UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
@@ -69,7 +71,8 @@ public class SecurityConfig {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
-        if (!origins.contains("https://*.vercel.app")) origins.add("https://*.vercel.app");
+        // Only this project's Vercel domains (production + preview deployments), not every *.vercel.app site.
+        if (!origins.contains("https://nova-assistant*.vercel.app")) origins.add("https://nova-assistant*.vercel.app");
         if (!origins.contains("http://localhost:3000")) origins.add("http://localhost:3000");
         config.setAllowedOriginPatterns(origins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));

@@ -77,6 +77,11 @@ nova:
       base-url: ${NOVA_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
       temperature: 0.6
       max-tokens: 1024
+    models:
+      fast: ${NOVA_AI_MODELS_FAST:llama-3.1-8b-instant}
+      strong: ${NOVA_AI_MODELS_STRONG:llama-3.3-70b-versatile}
+      catalog: "${NOVA_AI_MODELS_CATALOG:llama-3.3-70b-versatile|Llama 3.3 70B (potente),llama-3.1-8b-instant|Llama 3.1 8B (rápido),openai/gpt-oss-120b|GPT-OSS 120B}"
+      whisper: ${NOVA_AI_MODELS_WHISPER:whisper-large-v3}
     local:
       enabled: ${NOVA_AI_LOCAL_ENABLED:true}
       base-url: ${NOVA_AI_LOCAL_BASE_URL:http://localhost:8000/v1}
@@ -90,6 +95,12 @@ nova:
   search:
     enabled: ${NOVA_SEARCH_ENABLED:true}
     endpoint: ${NOVA_SEARCH_ENDPOINT:https://api.duckduckgo.com/}
+  auth:
+    registration-enabled: ${NOVA_AUTH_REGISTRATION_ENABLED:false}
+  rate-limit:
+    enabled: ${NOVA_RATE_LIMIT_ENABLED:true}
+    auth-per-minute: ${NOVA_RATE_LIMIT_AUTH_PER_MINUTE:8}
+    ai-per-minute: ${NOVA_RATE_LIMIT_AI_PER_MINUTE:30}
   soc:
     virustotal:
       api-key: ${NOVA_SOC_VIRUSTOTAL_API_KEY:}

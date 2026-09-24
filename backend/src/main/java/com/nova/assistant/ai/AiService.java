@@ -25,9 +25,6 @@ import java.util.concurrent.Executors;
 public class AiService {
 
     private static final int MAX_TOOL_ITERATIONS = 5;
-    // Groq model pair used by the "auto" router.
-    private static final String FAST_MODEL = "llama-3.1-8b-instant";
-    private static final String STRONG_MODEL = "llama-3.3-70b-versatile";
 
     private final AiProvider provider;
     private final MockAiProvider fallback;
@@ -46,7 +43,12 @@ public class AiService {
         OpenAiProvider e = localEngine;
         if (e == null) {
             AppProperties.Local l = properties.getAi().getLocal();
-            e = new OpenAiProvider(restClientBuilder, l.getBaseUrl(), l.getApiKey(), l.getModel());
+            org.springframework.http.client.SimpleClientHttpRequestFactory rf =
+                    new org.springframework.http.client.SimpleClientHttpRequestFactory();
+            rf.setConnectTimeout(2_000);   // fail fast when OpenJarvis/Ollama isn't running
+            rf.setReadTimeout(120_000);    // local models can be slow to answer
+            e = new OpenAiProvider(restClientBuilder.clone().requestFactory(rf),
+                    l.getBaseUrl(), l.getApiKey(), l.getModel());
             localEngine = e;
         }
         return e;
@@ -136,7 +138,8 @@ public class AiService {
                 "explica en detalle", "test", "prueba unitaria", "arquitectura", "optimiza", "vulnerab"}) {
             if (m.contains(k)) { complex = true; break; }
         }
-        return complex ? STRONG_MODEL : FAST_MODEL;
+        AppProperties.Models mc = properties.getAi().getModels();
+        return complex ? mc.getStrong() : mc.getFast();
     }
 
     private String generate(List<ChatMessage> messages) {
@@ -157,6 +160,24 @@ public class AiService {
             catch (Exception e) { return fallback.complete(baseMessages, temperature, maxTokens); }
         }
         try {
+            return runAgentic(userId, baseMessages, openAi, model, temperature, maxTokens);
+        } catch (Exception first) {
+            if (engine.local()) {
+                return "No consigo contactar con el motor local en " + properties.getAi().getLocal().getBaseUrl()
+                        + ". Comprueba que OpenJarvis (`jarvis serve`) u Ollama esté en marcha, o elige un modelo en la nube.";
+            }
+            if (model != null) {
+                // The chosen model may have been retired by the provider: retry once with the default model.
+                try { return runAgentic(userId, baseMessages, openAi, null, temperature, maxTokens); }
+                catch (Exception ignored) { /* fall through to the offline brain */ }
+            }
+            return fallback.complete(baseMessages, temperature, maxTokens);
+        }
+    }
+
+    private String runAgentic(UUID userId, List<ChatMessage> baseMessages, OpenAiProvider openAi, String model,
+                              double temperature, int maxTokens) {
+        {
             List<Map<String, Object>> msgs = new ArrayList<>();
             for (ChatMessage m : baseMessages) {
                 Map<String, Object> mm = new HashMap<>();
@@ -192,8 +213,6 @@ public class AiService {
             Map<String, Object> finalMsg = openAi.chatRaw(msgs, null, temperature, maxTokens, model);
             Object content = finalMsg.get("content");
             return content == null ? "" : content.toString().trim();
-        } catch (Exception e) {
-            return fallback.complete(baseMessages, temperature, maxTokens);
         }
     }
 

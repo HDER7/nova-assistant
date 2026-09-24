@@ -22,9 +22,13 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final com.nova.assistant.config.AppProperties properties;
 
     @Transactional
     public AuthResponse register(RegisterRequest req) {
+        if (!properties.getAuth().isRegistrationEnabled()) {
+            throw ApiException.forbidden("El registro de nuevas cuentas está deshabilitado.");
+        }
         if (userRepository.existsByEmailIgnoreCase(req.email())) {
             throw ApiException.conflict("Ya existe una cuenta con ese correo");
         }

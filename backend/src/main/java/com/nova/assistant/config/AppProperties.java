@@ -15,6 +15,37 @@ public class AppProperties {
     private Upload upload = new Upload();
     private Search search = new Search();
     private Soc soc = new Soc();
+    private Auth auth = new Auth();
+    private RateLimit rateLimit = new RateLimit();
+
+    @Getter @Setter
+    public static class Auth {
+        /** Public sign-up. Off by default: NOVA is a personal assistant. */
+        private boolean registrationEnabled = false;
+    }
+
+    @Getter @Setter
+    public static class RateLimit {
+        private boolean enabled = true;
+        /** Max auth attempts (login/register/refresh) per IP per minute. */
+        private int authPerMinute = 8;
+        /** Max AI calls (chat, voice, SOC) per IP per minute. */
+        private int aiPerMinute = 30;
+    }
+
+    @Getter @Setter
+    public static class Models {
+        /** Fast model used by the "auto" router for simple turns. */
+        private String fast = "llama-3.1-8b-instant";
+        /** Strong model used by the "auto" router for complex turns. */
+        private String strong = "llama-3.3-70b-versatile";
+        /** Selector catalog: comma-separated "id|label" pairs. */
+        private String catalog = "llama-3.3-70b-versatile|Llama 3.3 70B (potente),"
+                + "llama-3.1-8b-instant|Llama 3.1 8B (rápido),"
+                + "openai/gpt-oss-120b|GPT-OSS 120B";
+        /** Speech-to-text model. */
+        private String whisper = "whisper-large-v3";
+    }
 
     @Getter @Setter
     public static class Jwt {
@@ -28,6 +59,7 @@ public class AppProperties {
     public static class Ai {
         private String provider = "openai";
         private OpenAi openai = new OpenAi();
+        private Models models = new Models();
         /** Optional local brain: an OpenAI-compatible server such as OpenJarvis (`jarvis serve`) or Ollama. */
         private Local local = new Local();
     }
