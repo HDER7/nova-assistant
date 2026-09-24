@@ -20,7 +20,11 @@ services:
       - key: NOVA_AI_OPENAI_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: NOVA_AI_OPENAI_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
+      - key: NOVA_AI_MODELS_STRONG
+        value: openai/gpt-oss-120b
+      - key: NOVA_AI_MODELS_FAST
+        value: openai/gpt-oss-20b
       - key: NOVA_AI_OPENAI_API_KEY
         sync: false
       # Local brain (OpenJarvis/Ollama) can't be reached from Render's cloud — keep it off here.

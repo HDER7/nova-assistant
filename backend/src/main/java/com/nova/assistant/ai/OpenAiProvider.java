@@ -57,9 +57,14 @@ public class OpenAiProvider implements AiProvider {
     public Map<String, Object> chatRaw(List<Map<String, Object>> messages, List<Map<String, Object>> tools,
                                        double temperature, int maxTokens, String modelOverride) {
         Map<String, Object> body = new HashMap<>();
-        body.put("model", (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : model);
+        String effective = (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : model;
+        body.put("model", effective);
         body.put("temperature", temperature);
         body.put("max_tokens", maxTokens);
+        if (effective != null && effective.contains("gpt-oss")) {
+            // Reasoning models spend completion tokens thinking; keep it short so the answer isn't cut off.
+            body.put("reasoning_effort", "low");
+        }
         body.put("messages", messages);
         if (tools != null && !tools.isEmpty()) {
             body.put("tools", tools);

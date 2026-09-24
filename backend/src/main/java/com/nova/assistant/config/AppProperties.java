@@ -36,13 +36,13 @@ public class AppProperties {
     @Getter @Setter
     public static class Models {
         /** Fast model used by the "auto" router for simple turns. */
-        private String fast = "llama-3.1-8b-instant";
+        private String fast = "openai/gpt-oss-20b";
         /** Strong model used by the "auto" router for complex turns. */
-        private String strong = "llama-3.3-70b-versatile";
+        private String strong = "openai/gpt-oss-120b";
         /** Selector catalog: comma-separated "id|label" pairs. */
-        private String catalog = "llama-3.3-70b-versatile|Llama 3.3 70B (potente),"
-                + "llama-3.1-8b-instant|Llama 3.1 8B (rápido),"
-                + "openai/gpt-oss-120b|GPT-OSS 120B";
+        private String catalog = "openai/gpt-oss-120b|GPT-OSS 120B (potente),"
+                + "openai/gpt-oss-20b|GPT-OSS 20B (rápido),"
+                + "qwen/qwen3.8-27b|Qwen 3.8 27B";
         /** Speech-to-text model. */
         private String whisper = "whisper-large-v3";
     }

@@ -43,6 +43,10 @@ public class AiPersistence {
             cuando uses datos recordados, intégralos con naturalidad.
             """;
 
+    /** ~2.5K tokens of prior conversation: enough context, under the free tier's 8K tokens/minute. */
+    private static final int HISTORY_CHAR_BUDGET = 10_000;
+    private static final int MAX_CHARS_PER_OLD_MESSAGE = 2_500;
+
     private static final DateTimeFormatter ES =
             DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", new Locale("es", "ES"));
 
@@ -73,12 +77,24 @@ public class AiPersistence {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new ChatMessage("system", systemPrompt(userId)));
 
+        // Newest first: keep as much recent history as fits the budget (free-tier models cap tokens per minute).
         List<Message> recent = messageRepository
                 .findTop20ByConversation_IdOrderByCreatedAtDesc(conversation.getId());
-        Collections.reverse(recent);
-        for (Message m : recent) {
-            messages.add(new ChatMessage(roleOf(m.getRole()), m.getContent()));
+        List<ChatMessage> history = new ArrayList<>();
+        int budget = HISTORY_CHAR_BUDGET;
+        for (int i = 0; i < recent.size(); i++) {
+            Message m = recent.get(i);
+            String content = m.getContent() == null ? "" : m.getContent();
+            // The current user turn (i == 0) is always kept whole; older turns are clipped.
+            if (i > 0 && content.length() > MAX_CHARS_PER_OLD_MESSAGE) {
+                content = content.substring(0, MAX_CHARS_PER_OLD_MESSAGE) + " …[recortado]";
+            }
+            if (i > 0 && content.length() > budget) break;
+            budget -= content.length();
+            history.add(new ChatMessage(roleOf(m.getRole()), content));
         }
+        Collections.reverse(history);
+        messages.addAll(history);
         return new ProviderContext(conversation.getId(), messages);
     }
 

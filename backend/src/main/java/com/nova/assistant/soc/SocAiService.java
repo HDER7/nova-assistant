@@ -27,6 +27,17 @@ public class SocAiService {
 
     private final AiService aiService;
 
-    public SocAnalysis triage(String content) { return new SocAnalysis(aiService.oneShot(TRIAGE_SYSTEM, content)); }
-    public SocAnalysis phishing(String content) { return new SocAnalysis(aiService.oneShot(PHISHING_SYSTEM, content)); }
+    /** ~3K tokens of evidence keeps a single analysis under the free tier's 8K tokens/minute. */
+    private static final int MAX_INPUT_CHARS = 12_000;
+
+    public SocAnalysis triage(String content) { return new SocAnalysis(aiService.oneShot(TRIAGE_SYSTEM, clip(content))); }
+    public SocAnalysis phishing(String content) { return new SocAnalysis(aiService.oneShot(PHISHING_SYSTEM, clip(content))); }
+
+    private String clip(String content) {
+        if (content == null) return "";
+        if (content.length() <= MAX_INPUT_CHARS) return content;
+        return content.substring(0, MAX_INPUT_CHARS)
+                + "\n\n[Contenido recortado a " + MAX_INPUT_CHARS + " de " + content.length()
+                + " caracteres por límites del modelo; indícalo en el análisis.]";
+    }
 }

@@ -76,11 +76,11 @@ nova:
       model: ${NOVA_AI_OPENAI_MODEL:gpt-4o-mini}
       base-url: ${NOVA_AI_OPENAI_BASE_URL:https://api.openai.com/v1}
       temperature: 0.6
-      max-tokens: 1024
+      max-tokens: ${NOVA_AI_OPENAI_MAX_TOKENS:3072}
     models:
-      fast: ${NOVA_AI_MODELS_FAST:llama-3.1-8b-instant}
-      strong: ${NOVA_AI_MODELS_STRONG:llama-3.3-70b-versatile}
-      catalog: "${NOVA_AI_MODELS_CATALOG:llama-3.3-70b-versatile|Llama 3.3 70B (potente),llama-3.1-8b-instant|Llama 3.1 8B (rápido),openai/gpt-oss-120b|GPT-OSS 120B}"
+      fast: ${NOVA_AI_MODELS_FAST:openai/gpt-oss-20b}
+      strong: ${NOVA_AI_MODELS_STRONG:openai/gpt-oss-120b}
+      catalog: "${NOVA_AI_MODELS_CATALOG:openai/gpt-oss-120b|GPT-OSS 120B (potente),openai/gpt-oss-20b|GPT-OSS 20B (rápido),qwen/qwen3.8-27b|Qwen 3.8 27B}"
       whisper: ${NOVA_AI_MODELS_WHISPER:whisper-large-v3}
     local:
       enabled: ${NOVA_AI_LOCAL_ENABLED:true}

@@ -24,6 +24,10 @@ import java.util.concurrent.Executors;
 @RequiredArgsConstructor
 public class AiService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AiService.class);
+    /** How many different models to try before giving up on a turn. */
+    private static final int MAX_MODEL_ATTEMPTS = 4;
+
     private static final int MAX_TOOL_ITERATIONS = 5;
 
     private final AiProvider provider;
@@ -35,6 +39,11 @@ public class AiService {
 
     /** Lazily-built local engine (OpenJarvis/Ollama), created on first use from config. */
     private volatile OpenAiProvider localEngine;
+
+    /** Thrown when the model failed after tools already ran — retrying would repeat side effects. */
+    private static final class PartialTurnException extends RuntimeException {
+        PartialTurnException(Exception cause) { super(cause); }
+    }
 
     /** A resolved inference target: which OpenAI-compatible engine + which model id. */
     private record Engine(OpenAiProvider openAi, String model, boolean local) {}
@@ -145,8 +154,95 @@ public class AiService {
     private String generate(List<ChatMessage> messages) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
-        try { return provider.complete(messages, temperature, maxTokens); }
-        catch (Exception e) { return fallback.complete(messages, temperature, maxTokens); }
+        if (!(provider instanceof OpenAiProvider openAi)) {
+            return fallback.complete(messages, temperature, maxTokens);
+        }
+        List<Map<String, Object>> msgs = new ArrayList<>();
+        for (ChatMessage m : messages) {
+            Map<String, Object> mm = new HashMap<>();
+            mm.put("role", m.role());
+            mm.put("content", m.content());
+            msgs.add(mm);
+        }
+        Exception last = null;
+        for (String candidate : candidates(null)) {
+            try {
+                Map<String, Object> msg = openAi.chatRaw(msgs, null, temperature, maxTokens, candidate);
+                Object content = msg.get("content");
+                String text = content == null ? "" : content.toString().trim();
+                if (!text.isBlank()) return text;
+                last = new IllegalStateException("respuesta vacia de " + label(candidate));
+            } catch (Exception e) {
+                last = e;
+                logFailure(candidate, e);
+                if (!retriable(e)) break;
+            }
+        }
+        return explain(last);
+    }
+
+    /** Ordered, de-duplicated list of models to try: requested → default → strong → fast → rest of catalog. */
+    private List<String> candidates(String requested) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (requested != null && !requested.isBlank()) out.add(requested);
+        out.add(""); // "" = provider's configured default model
+        AppProperties.Models mc = properties.getAi().getModels();
+        if (mc.getStrong() != null && !mc.getStrong().isBlank()) out.add(mc.getStrong());
+        if (mc.getFast() != null && !mc.getFast().isBlank()) out.add(mc.getFast());
+        for (String entry : mc.getCatalog().split(",")) {
+            String id = entry.contains("|") ? entry.substring(0, entry.indexOf('|')).trim() : entry.trim();
+            if (!id.isEmpty()) out.add(id);
+        }
+        List<String> list = new ArrayList<>();
+        for (String m : out) {
+            list.add(m.isEmpty() ? null : m);
+            if (list.size() >= MAX_MODEL_ATTEMPTS) break;
+        }
+        return list;
+    }
+
+    private String label(String model) {
+        return model == null ? properties.getAi().getOpenai().getModel() : model;
+    }
+
+    private void logFailure(String model, Exception e) {
+        if (e instanceof org.springframework.web.client.RestClientResponseException r) {
+            String body = r.getResponseBodyAsString();
+            log.warn("AI call failed [model={}] HTTP {}: {}", label(model), r.getStatusCode().value(),
+                    body.length() > 400 ? body.substring(0, 400) : body);
+        } else {
+            log.warn("AI call failed [model={}]: {}", label(model), e.toString());
+        }
+    }
+
+    /** Auth errors won't be fixed by switching model; everything else (429, 413, retired model, 5xx) might. */
+    private boolean retriable(Exception e) {
+        if (e instanceof org.springframework.web.client.RestClientResponseException r) {
+            int s = r.getStatusCode().value();
+            return s != 401 && s != 403;
+        }
+        return true;
+    }
+
+    /** Human explanation instead of silently answering with the offline brain. */
+    private String explain(Exception e) {
+        if (e instanceof org.springframework.web.client.RestClientResponseException r) {
+            int s = r.getStatusCode().value();
+            String body = r.getResponseBodyAsString().toLowerCase();
+            if (s == 401 || s == 403) {
+                return "⚠️ La clave del proveedor de IA no es válida (¿la rotaste?). Actualiza NOVA_AI_OPENAI_API_KEY en Render.";
+            }
+            if (s == 429) {
+                return "⚠️ Se alcanzó el límite de uso del plan gratuito de Groq en todos los modelos disponibles. Espera un minuto e inténtalo de nuevo.";
+            }
+            if (s == 413 || body.contains("too large") || body.contains("context_length")) {
+                return "⚠️ La petición es demasiado grande para el plan gratuito. Prueba con un texto más corto o abre una conversación nueva.";
+            }
+            if (body.contains("model") && (body.contains("decommissioned") || body.contains("not found") || body.contains("does not exist"))) {
+                return "⚠️ Los modelos configurados ya no están disponibles en el proveedor. Revisa NOVA_AI_OPENAI_MODEL y NOVA_AI_MODELS_* en Render.";
+            }
+        }
+        return "⚠️ No pude obtener respuesta del proveedor de IA ahora mismo. Inténtalo de nuevo en unos segundos.";
     }
 
     private String generateAgentic(UUID userId, List<ChatMessage> baseMessages, Engine engine) {
@@ -159,25 +255,39 @@ public class AiService {
             try { return provider.complete(baseMessages, temperature, maxTokens); }
             catch (Exception e) { return fallback.complete(baseMessages, temperature, maxTokens); }
         }
-        try {
-            return runAgentic(userId, baseMessages, openAi, model, temperature, maxTokens);
-        } catch (Exception first) {
-            if (engine.local()) {
+        if (engine.local()) {
+            try {
+                return runAgentic(userId, baseMessages, openAi, model, temperature, maxTokens);
+            } catch (Exception e) {
+                logFailure(model, e);
                 return "No consigo contactar con el motor local en " + properties.getAi().getLocal().getBaseUrl()
                         + ". Comprueba que OpenJarvis (`jarvis serve`) u Ollama esté en marcha, o elige un modelo en la nube.";
             }
-            if (model != null) {
-                // The chosen model may have been retired by the provider: retry once with the default model.
-                try { return runAgentic(userId, baseMessages, openAi, null, temperature, maxTokens); }
-                catch (Exception ignored) { /* fall through to the offline brain */ }
-            }
-            return fallback.complete(baseMessages, temperature, maxTokens);
         }
+        // Cloud: walk the model chain so a retired or rate-limited model doesn't break the conversation.
+        Exception last = null;
+        for (String candidate : candidates(model)) {
+            try {
+                String text = runAgentic(userId, baseMessages, openAi, candidate, temperature, maxTokens);
+                if (text != null && !text.isBlank()) return text;
+                last = new IllegalStateException("respuesta vacia de " + label(candidate));
+            } catch (PartialTurnException p) {
+                logFailure(candidate, (Exception) p.getCause());
+                return "Ejecuté las acciones solicitadas, pero no pude redactar la respuesta final. "
+                        + "Revisa tus tareas/notas/recordatorios: los cambios ya están guardados.";
+            } catch (Exception e) {
+                last = e;
+                logFailure(candidate, e);
+                if (!retriable(e)) break;
+            }
+        }
+        return explain(last);
     }
 
     private String runAgentic(UUID userId, List<ChatMessage> baseMessages, OpenAiProvider openAi, String model,
                               double temperature, int maxTokens) {
-        {
+        boolean toolsRan = false;
+        try {
             List<Map<String, Object>> msgs = new ArrayList<>();
             for (ChatMessage m : baseMessages) {
                 Map<String, Object> mm = new HashMap<>();
@@ -190,10 +300,14 @@ public class AiService {
                 Map<String, Object> assistant = openAi.chatRaw(msgs, tools, temperature, maxTokens, model);
                 Object toolCalls = assistant.get("tool_calls");
                 if (!(toolCalls instanceof List<?> calls) || calls.isEmpty()) {
-                    Object content = assistant.get("content");
-                    return content == null ? "" : content.toString().trim();
+                    return finalText(assistant.get("content"), toolsRan);
                 }
-                msgs.add(assistant);
+                // Echo back only what the API accepts (reasoning models add extra fields like "reasoning").
+                Map<String, Object> echo = new HashMap<>();
+                echo.put("role", "assistant");
+                echo.put("content", assistant.get("content") == null ? "" : assistant.get("content"));
+                echo.put("tool_calls", toolCalls);
+                msgs.add(echo);
                 for (Object o : calls) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> call = (Map<String, Object>) o;
@@ -203,6 +317,7 @@ public class AiService {
                     String fname = function == null ? null : String.valueOf(function.get("name"));
                     String fargs = function == null ? null : String.valueOf(function.get("arguments"));
                     String result = toolService.execute(userId, fname, fargs);
+                    toolsRan = true;
                     Map<String, Object> toolMsg = new HashMap<>();
                     toolMsg.put("role", "tool");
                     toolMsg.put("tool_call_id", id);
@@ -211,9 +326,17 @@ public class AiService {
                 }
             }
             Map<String, Object> finalMsg = openAi.chatRaw(msgs, null, temperature, maxTokens, model);
-            Object content = finalMsg.get("content");
-            return content == null ? "" : content.toString().trim();
+            return finalText(finalMsg.get("content"), toolsRan);
+        } catch (RuntimeException e) {
+            if (toolsRan) throw new PartialTurnException(e);
+            throw e;
         }
+    }
+
+    private String finalText(Object content, boolean toolsRan) {
+        String text = content == null ? "" : content.toString().trim();
+        if (text.isBlank() && toolsRan) return "Hecho. He completado las acciones solicitadas.";
+        return text;
     }
 
     private List<String> tokenize(String text) {
