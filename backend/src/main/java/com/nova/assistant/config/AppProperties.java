@@ -105,6 +105,14 @@ public class AppProperties {
     @Getter @Setter
     public static class Soc {
         private Virustotal virustotal = new Virustotal();
+        private KevWatch kevWatch = new KevWatch();
+    }
+
+    @Getter @Setter
+    public static class KevWatch {
+        private boolean enabled = true;
+        /** Comma-separated vendor/product keywords to alert on; empty = every new KEV entry. */
+        private String vendors = "Fortinet,Microsoft,Cisco,Palo Alto,Ivanti,Citrix,VMware,Apache,Linux,Google,Apple,Oracle,SonicWall,Juniper,Atlassian";
     }
 
     @Getter @Setter

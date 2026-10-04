@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   CheckSquare, StickyNote, BellRing, CalendarDays, MessageSquare,
-  BrainCircuit, ArrowRight, Sparkles, Volume2,
+  BrainCircuit, ArrowRight, Sparkles, Volume2, Crosshair,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
@@ -19,6 +19,7 @@ import { formatDate } from "@/lib/utils";
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const lang = user?.locale === "en" ? "en-US" : "es-ES";
+  const persona = (user?.persona || "JARVIS").toUpperCase();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -44,17 +45,17 @@ export default function DashboardPage() {
     const todo = summary.tasks.todo ?? 0;
     const rem = summary.remindersPending ?? 0;
     const ev = summary.upcomingEvents ?? 0;
-    const who = surname ? `, Señor ${surname}` : "";
+    const who = persona === "FRIDAY" ? ", jefe" : persona === "EDITH" ? "" : surname ? `, Señor ${surname}` : "";
     const parts: string[] = [];
     if (todo) parts.push(`${todo} ${todo === 1 ? "tarea pendiente" : "tareas pendientes"}`);
     if (rem) parts.push(`${rem} ${rem === 1 ? "recordatorio" : "recordatorios"}`);
     if (ev) parts.push(`${ev} ${ev === 1 ? "evento próximo" : "eventos próximos"}`);
     const status = parts.length
-      ? `Tiene ${parts.length > 1 ? parts.slice(0, -1).join(", ") + " y " + parts[parts.length - 1] : parts[0]}.`
-      : "No hay nada urgente en su agenda.";
-    const close = parts.length ? "Cuando quiera, empezamos." : "Todo bajo control.";
+      ? `${persona === "FRIDAY" ? "Tienes" : "Tiene"} ${parts.length > 1 ? parts.slice(0, -1).join(", ") + " y " + parts[parts.length - 1] : parts[0]}.`
+      : persona === "FRIDAY" ? "No tienes nada urgente." : persona === "EDITH" ? "Sin amenazas ni pendientes urgentes." : "No hay nada urgente en su agenda.";
+    const close = persona === "EDITH" ? "Sistemas operativos." : persona === "FRIDAY" ? (parts.length ? "¿Arrancamos?" : "Día tranquilo.") : parts.length ? "Cuando quiera, empezamos." : "Todo bajo control.";
     return `${greeting}${who}. ${status} ${close}`;
-  }, [summary, surname, greeting]);
+  }, [summary, surname, greeting, persona]);
 
   useEffect(() => {
     if (!briefing) return;
@@ -63,18 +64,18 @@ export default function DashboardPage() {
     if (done) return;
     try { sessionStorage.setItem("nova.briefed", "1"); } catch { /* ignore */ }
     if (ttsSupported() && !soundMuted()) {
-      const t = window.setTimeout(() => speak(briefing, lang), 2400);
+      const t = window.setTimeout(() => speak(briefing, lang, undefined, persona), 2400);
       return () => clearTimeout(t);
     }
-  }, [briefing, lang]);
+  }, [briefing, lang, persona]);
 
   return (
     <div className="space-y-6">
       <section className="nova-card relative flex flex-col items-start justify-between gap-6 overflow-hidden md:flex-row md:items-center">
         <div className="relative z-10">
-          <p className="nova-label">NOVA · en línea</p>
+          <p className="nova-label">NOVA · {persona} · en línea</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-            {greeting}{surname ? `, Señor ${surname}` : ""}
+            {greeting}{persona === "FRIDAY" ? ", jefe" : persona === "EDITH" ? "" : surname ? `, Señor ${surname}` : ""}
           </h1>
           <div className="mt-2 flex max-w-md items-start gap-2">
             <p className="text-sm text-muted-foreground">
@@ -82,7 +83,7 @@ export default function DashboardPage() {
             </p>
             {briefing && ttsSupported() && (
               <button
-                onClick={() => speak(briefing, lang)}
+                onClick={() => speak(briefing, lang, undefined, persona)}
                 title="Reproducir informe"
                 className="mt-0.5 shrink-0 text-muted-foreground transition hover:text-primary"
               >
@@ -93,6 +94,9 @@ export default function DashboardPage() {
           <div className="mt-5 flex flex-wrap gap-3">
             <Link href="/chat" className="nova-btn-primary">
               <MessageSquare className="h-4 w-4" /> Hablar con NOVA
+            </Link>
+            <Link href="/hud" className="nova-btn-ghost">
+              <Crosshair className="h-4 w-4" /> Modo HUD
             </Link>
             <Link href="/tasks" className="nova-btn-ghost">
               <CheckSquare className="h-4 w-4" /> Nueva tarea

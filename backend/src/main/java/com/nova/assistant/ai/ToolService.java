@@ -14,6 +14,7 @@ import com.nova.assistant.search.SearchResult;
 import com.nova.assistant.search.WebSearchService;
 import com.nova.assistant.soc.CveResult;
 import com.nova.assistant.soc.IocResult;
+import com.nova.assistant.soc.KevService;
 import com.nova.assistant.soc.SocService;
 import com.nova.assistant.soc.VtResult;
 import com.nova.assistant.task.CreateTaskRequest;
@@ -47,6 +48,7 @@ public class ToolService {
     private final MemoryService memoryService;
     private final WebSearchService webSearchService;
     private final SocService socService;
+    private final KevService kevService;
     private final ObjectMapper mapper;
 
     public List<Map<String, Object>> toolSpecs() {
@@ -92,6 +94,13 @@ public class ToolService {
                 Map.of("id", str("Identificador CVE, ej CVE-2024-3094")), List.of("id")));
         tools.add(fn("extract_iocs", "Extrae y clasifica IOCs (IPs, dominios, URLs, emails, hashes, CVEs) de un texto.",
                 Map.of("text", str("Texto/log del que extraer IOCs")), List.of("text")));
+        tools.add(fn("kev_recent", "Vulnerabilidades explotadas activamente anadidas recientemente al catalogo CISA KEV.",
+                Map.of("days", Map.of("type", "integer", "description", "Ventana en dias hacia atras (1-30), por defecto 7"),
+                        "vendor", str("Filtro opcional por fabricante/producto, ej Fortinet, Microsoft")),
+                List.of()));
+        tools.add(fn("agenda", "Resumen de la agenda del usuario: tareas pendientes con vencimiento, recordatorios y eventos proximos.",
+                Map.of("hours", Map.of("type", "integer", "description", "Horas hacia adelante a revisar (1-168), por defecto 24")),
+                List.of()));
         return tools;
     }
 
@@ -164,6 +173,52 @@ public class ToolService {
                     appendIocs(sb, "Emails", i.emails()); appendIocs(sb, "SHA256", i.sha256()); appendIocs(sb, "SHA1", i.sha1());
                     appendIocs(sb, "MD5", i.md5()); appendIocs(sb, "CVEs", i.cves());
                     yield sb.toString();
+                }
+                case "kev_recent" -> {
+                    int days = (a.has("days") && a.get("days").canConvertToInt()) ? a.get("days").asInt() : 7;
+                    days = Math.max(1, Math.min(days, 30));
+                    String vendor = text(a, "vendor");
+                    var list = kevService.recent(days, vendor);
+                    if (list.isEmpty()) {
+                        yield "CISA KEV: sin vulnerabilidades nuevas explotadas en los ultimos " + days + " dias"
+                                + (vendor != null ? " para " + vendor : "") + " (o el catalogo no esta disponible).";
+                    }
+                    StringBuilder sb = new StringBuilder("CISA KEV — explotadas activamente, ultimos " + days + " dias ("
+                            + list.size() + "):\n");
+                    int n = 0;
+                    for (var e : list) {
+                        sb.append("- ").append(e.cveId()).append(" | ").append(e.vendor()).append(" ").append(e.product())
+                          .append(" | anadida ").append(e.dateAdded())
+                          .append(e.ransomware() ? " | USADA EN RANSOMWARE" : "")
+                          .append(" | ").append(e.name()).append("\n");
+                        if (++n >= 12) { sb.append("(… y ").append(list.size() - n).append(" mas)\n"); break; }
+                    }
+                    yield sb.toString();
+                }
+                case "agenda" -> {
+                    int hours = (a.has("hours") && a.get("hours").canConvertToInt()) ? a.get("hours").asInt() : 24;
+                    hours = Math.max(1, Math.min(hours, 168));
+                    Instant now = Instant.now();
+                    Instant until = now.plusSeconds(hours * 3600L);
+                    StringBuilder sb = new StringBuilder("Agenda (proximas " + hours + " h):\n");
+                    int count = 0;
+                    for (TaskResponse t : taskService.list(userId, null)) {
+                        if ("DONE".equals(t.status()) || t.dueAt() == null || t.dueAt().isAfter(until)) continue;
+                        sb.append("- Tarea").append(t.dueAt().isBefore(now) ? " VENCIDA" : "").append(": ").append(t.title())
+                          .append(" [").append(t.priority()).append("] vence ").append(t.dueAt()).append("\n");
+                        count++;
+                    }
+                    for (var r : reminderService.list(userId)) {
+                        if (r.completed() || r.remindAt() == null || r.remindAt().isAfter(until) || r.remindAt().isBefore(now)) continue;
+                        sb.append("- Recordatorio: ").append(r.title()).append(" a las ").append(r.remindAt()).append("\n");
+                        count++;
+                    }
+                    for (var ev : calendarService.list(userId, now, until)) {
+                        sb.append("- Evento: ").append(ev.title()).append(" ").append(ev.startAt())
+                          .append(ev.location() != null && !ev.location().isBlank() ? " en " + ev.location() : "").append("\n");
+                        count++;
+                    }
+                    yield count == 0 ? "Agenda despejada en las proximas " + hours + " h." : sb.toString();
                 }
                 default -> "ERROR: funcion no soportada: " + name;
             };

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, CheckSquare, StickyNote,
-  CalendarDays, BrainCircuit, Settings, Wand2, ShieldAlert, X,
+  CalendarDays, BrainCircuit, Settings, Wand2, ShieldAlert, X, Crosshair,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArcReactor } from "@/components/ArcReactor";
@@ -13,6 +13,7 @@ import { useAuthStore } from "@/store/authStore";
 const NAV = [
   { href: "/", label: "Panel", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/hud", label: "HUD", icon: Crosshair },
   { href: "/tasks", label: "Tareas", icon: CheckSquare },
   { href: "/notes", label: "Notas", icon: StickyNote },
   { href: "/calendar", label: "Calendario", icon: CalendarDays },

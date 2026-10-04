@@ -107,3 +107,23 @@ export interface DashboardSummary {
   memories: number;
   unreadNotifications: number;
 }
+
+/** Holographic HUD card emitted while NOVA uses a tool. */
+export interface ToolCard {
+  id: string;
+  tool: string;
+  phase: "start" | "done";
+  title: string;
+  subtitle?: string;
+  status: "running" | "ok" | "warn" | "danger" | "error";
+  text?: string;
+  gauge?: number;
+  metrics?: { label: string; value: string | number }[];
+}
+
+export interface Protocol {
+  id: string | null;
+  name: string;
+  steps: string;
+  builtIn: boolean;
+}

@@ -8,6 +8,19 @@ import { useUIStore } from "@/store/uiStore";
 import { useTheme } from "@/providers/ThemeProvider";
 import type { User } from "@/lib/types";
 import { formatDate, cn } from "@/lib/utils";
+import { VoiceSettings } from "@/components/VoiceSettings";
+import { ProtocolsPanel } from "@/components/ProtocolsPanel";
+
+const PERSONAS = [
+  { id: "JARVIS", desc: "Mayordomo formal, ingenio seco. Te llama “señor”." },
+  { id: "FRIDAY", desc: "Cercana y desenfadada. Te tutea y te llama “jefe”." },
+  { id: "EDITH", desc: "Táctica para el SOC: va al grano, todo en clave de riesgo." },
+];
+
+function personaKey(p: string) {
+  const k = (p || "").toUpperCase();
+  return PERSONAS.some((x) => x.id === k) ? k : "JARVIS";
+}
 
 type EngineStatus = {
   provider: string;
@@ -60,7 +73,7 @@ export default function SettingsPage() {
     e.preventDefault();
     setSavingPrefs(true);
     try {
-      const updated = await api.patch<User>("/api/users/me/preferences", { theme, locale, persona });
+      const updated = await api.patch<User>("/api/users/me/preferences", { theme, locale, persona: personaKey(persona) });
       setUser(updated);
       setTheme(theme === "light" ? "light" : "dark");
       pushToast({ title: "Preferencias guardadas", variant: "success" });
@@ -117,12 +130,32 @@ export default function SettingsPage() {
           </div>
           <div>
             <label className="mb-1.5 block text-xs text-muted-foreground">Personalidad del asistente</label>
-            <input value={persona} onChange={(e) => setPersona(e.target.value)} className="nova-input" placeholder="NOVA" />
+            <div className="grid grid-cols-3 gap-2">
+              {PERSONAS.map((p) => (
+                <button
+                  type="button"
+                  key={p.id}
+                  onClick={() => setPersona(p.id)}
+                  className={cn(
+                    "rounded-md border p-2 text-left transition",
+                    personaKey(persona) === p.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"
+                  )}
+                >
+                  <span className="block text-xs font-semibold tracking-[0.18em]">{p.id}</span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{p.desc}</span>
+                </button>
+              ))}
+            </div>
           </div>
           <button type="submit" disabled={savingPrefs} className="nova-btn-primary">
             {savingPrefs ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar preferencias
           </button>
         </form>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <VoiceSettings persona={personaKey(persona)} lang={locale === "en" ? "en-US" : "es-ES"} />
+        <ProtocolsPanel />
       </div>
 
       <section className="nova-card space-y-4">

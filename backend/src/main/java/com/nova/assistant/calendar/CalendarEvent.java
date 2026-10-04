@@ -48,6 +48,11 @@ public class CalendarEvent {
     @Builder.Default
     private String color = "cyan";
 
+    /** Proactive "starts in 10 minutes" notice already sent. */
+    @Column(name = "heads_up_sent", nullable = false)
+    @Builder.Default
+    private boolean headsUpSent = false;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

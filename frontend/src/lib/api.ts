@@ -1,3 +1,4 @@
+import type { ToolCard } from "./types";
 import { useAuthStore } from "@/store/authStore";
 import type { AuthResponse } from "@/lib/types";
 
@@ -89,14 +90,19 @@ export const api = {
 export interface StreamHandlers {
   onMeta?: (conversationId: string) => void;
   onToken?: (text: string) => void;
+  /** Holographic tool card (phase "start" while running, "done" with the result). */
+  onTool?: (card: ToolCard) => void;
   onDone?: (message: unknown) => void;
   onError?: (err: Error) => void;
+  /** The caller aborted the stream (e.g. the user interrupted NOVA by voice). */
+  onAbort?: () => void;
 }
 
 export async function streamChat(
   body: { conversationId?: string | null; message: string; model?: string | null },
   handlers: StreamHandlers,
-  retry = true
+  retry = true,
+  signal?: AbortSignal
 ): Promise<void> {
   const token = useAuthStore.getState().accessToken;
   let res: Response;
@@ -108,15 +114,20 @@ export async function streamChat(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (e) {
+    if (signal?.aborted) {
+      handlers.onAbort?.();
+      return;
+    }
     handlers.onError?.(e instanceof Error ? e : new Error("Network error"));
     return;
   }
 
   if (res.status === 401 && retry) {
     const ok = await refreshTokens();
-    if (ok) return streamChat(body, handlers, false);
+    if (ok) return streamChat(body, handlers, false, signal);
   }
   if (!res.ok || !res.body) {
     handlers.onError?.(new Error("No se pudo iniciar el streaming de la respuesta"));
@@ -127,7 +138,18 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   while (true) {
-    const { value, done } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (e) {
+      if (signal?.aborted) {
+        handlers.onAbort?.();
+        return;
+      }
+      handlers.onError?.(e instanceof Error ? e : new Error("Stream interrupted"));
+      return;
+    }
+    const { value, done } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const parts = buffer.split("\n\n");
@@ -150,6 +172,7 @@ function parseEvent(raw: string, handlers: StreamHandlers) {
     const parsed = JSON.parse(data);
     if (event === "meta") handlers.onMeta?.(parsed.conversationId);
     else if (event === "token") handlers.onToken?.(parsed.t);
+    else if (event === "tool") handlers.onTool?.(parsed as ToolCard);
     else if (event === "done") handlers.onDone?.(parsed);
   } catch {
     /* ignore malformed chunk */

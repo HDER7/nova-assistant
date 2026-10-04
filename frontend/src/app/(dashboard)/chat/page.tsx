@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import Link from "next/link";
 import {
-  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon, Radio,
+  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon, Radio, Crosshair,
 } from "lucide-react";
 import { api, streamChat } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
@@ -10,9 +11,11 @@ import { useUIStore } from "@/store/uiStore";
 import { ArcReactor } from "@/components/ArcReactor";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { VoiceWave } from "@/components/VoiceWave";
-import { speak, cancelSpeech, ttsSupported, preloadVoices } from "@/lib/speech";
-import { playBlip, playListen } from "@/lib/sound";
-import type { Conversation, Message } from "@/lib/types";
+import { ToolChip } from "@/components/HoloCard";
+import { SentenceSpeaker, cancelAll, ttsAvailable, warmUpVoices } from "@/lib/tts";
+import { useVoiceLoop, voiceCaptureSupported, type VoicePhase } from "@/lib/useVoiceLoop";
+import { playBlip } from "@/lib/sound";
+import type { Conversation, Message, ToolCard } from "@/lib/types";
 import { cn, relativeTime } from "@/lib/utils";
 
 interface ChatMessage {
@@ -20,11 +23,11 @@ interface ChatMessage {
   role: "USER" | "ASSISTANT" | "SYSTEM";
   content: string;
   createdAt?: string;
+  tools?: ToolCard[];
 }
 
 const STREAMING_ID = "__streaming__";
 
-/** Pick a MediaRecorder mime type the current browser actually supports. */
 function pickAudioMime(): string {
   if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
   for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg"]) {
@@ -32,18 +35,29 @@ function pickAudioMime(): string {
   }
   return "";
 }
+
 const SUGGESTIONS = [
-  "Recuerda que prefiero los informes en inglés",
+  "NOVA, protocolo inicio de turno",
   "¿Qué reputación tiene 8.8.8.8 en VirusTotal?",
   "Busca el CVE-2024-3094 y créame una tarea para parchear",
-  "Escríbeme un script de Python que extraiga IOCs de un log",
+  "¿Qué vulnerabilidades explotadas salieron esta semana?",
 ];
+
+const PHASE_LABEL: Record<VoicePhase, string> = {
+  off: "",
+  calibrating: "Calibrando ruido ambiente… silencio un momento",
+  listening: "Escuchando — habla con naturalidad",
+  recording: "Te escucho…",
+  transcribing: "Procesando…",
+  responding: "Respondiendo — háblale para interrumpir",
+};
 
 export default function ChatPage() {
   const user = useAuthStore((s) => s.user);
   const pushToast = useUIStore((s) => s.pushToast);
   const lang = user?.locale === "en" ? "en-US" : "es-ES";
   const sttLang = user?.locale === "en" ? "en" : "es";
+  const persona = (user?.persona || "JARVIS").toUpperCase();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -55,7 +69,6 @@ export default function ChatPage() {
   const [speakReplies, setSpeakReplies] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
   const [voiceOk, setVoiceOk] = useState(false);
-  const [hfAnalyser, setHfAnalyser] = useState<AnalyserNode | null>(null);
   const [model, setModel] = useState("auto");
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
 
@@ -63,47 +76,17 @@ export default function ChatPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const speakRef = useRef(false);
-  speakRef.current = speakReplies || handsFree;
-  const handsFreeRef = useRef(false);
-  handsFreeRef.current = handsFree;
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
+  const speakRef = useRef(false);
+  speakRef.current = speakReplies || handsFree;
+  const abortRef = useRef<AbortController | null>(null);
   const sendRef = useRef<(t?: string) => void>(() => {});
-  const speakingRef = useRef(false);
-  const cooldownRef = useRef(0);
-
-  // Hands-free VAD (voice activity detection) engine — works in any browser via MediaRecorder + Whisper.
-  const hfStreamRef = useRef<MediaStream | null>(null);
-  const hfCtxRef = useRef<AudioContext | null>(null);
-  const hfRecRef = useRef<MediaRecorder | null>(null);
-  const hfChunksRef = useRef<Blob[]>([]);
-  const hfRafRef = useRef<number>(0);
-  const hfStateRef = useRef<"idle" | "calibrating" | "listening" | "recording" | "busy">("idle");
-  const [hfCalibrating, setHfCalibrating] = useState(false);
-  const speechStartRef = useRef(0);
-  const silenceStartRef = useRef(0);
-  const hfMimeRef = useRef<string>("");
 
   useEffect(() => {
-    preloadVoices();
-    setVoiceOk(
-      typeof navigator !== "undefined" &&
-        !!navigator.mediaDevices?.getUserMedia &&
-        typeof MediaRecorder !== "undefined"
-    );
+    warmUpVoices();
+    setVoiceOk(voiceCaptureSupported());
   }, []);
-
-  const speakReply = useCallback((text: string) => {
-    const resume = () => {
-      speakingRef.current = false;
-      cooldownRef.current = Date.now() + 600; // ignore the tail NOVA just spoke
-      if (handsFreeRef.current && hfStateRef.current === "busy") hfStateRef.current = "listening";
-    };
-    if (!text) { resume(); return; }
-    speakingRef.current = true;
-    speak(text, lang, resume);
-  }, [lang]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -116,6 +99,7 @@ export default function ChatPage() {
   }, []);
 
   const selectConversation = useCallback(async (id: string) => {
+    cancelAll();
     setActiveId(id);
     try {
       const msgs = await api.get<Message[]>(`/api/conversations/${id}/messages`);
@@ -139,11 +123,14 @@ export default function ChatPage() {
     api.get<{ models: { id: string; label: string }[] }>("/api/chat/models").then((r) => setModels(r.models)).catch(() => {});
   }, []);
 
+  useEffect(() => () => cancelAll(), []);
+
   function newConversation() {
+    abortRef.current?.abort();
+    cancelAll();
     setActiveId(null);
     setMessages([]);
     setInput("");
-    cancelSpeech();
   }
 
   async function deleteConversation(id: string, e: React.MouseEvent) {
@@ -162,18 +149,30 @@ export default function ChatPage() {
 
   async function send(textArg?: string) {
     const text = (textArg ?? input).trim();
-    if (!text || streaming) return;
+    if (!text || streamingRef.current) return;
     playBlip();
+    cancelAll();
 
     setMessages((prev) => [
       ...prev,
       { id: `u-${Date.now()}`, role: "USER", content: text },
-      { id: STREAMING_ID, role: "ASSISTANT", content: "" },
+      { id: STREAMING_ID, role: "ASSISTANT", content: "", tools: [] },
     ]);
     setInput("");
     setStreaming(true);
+    streamingRef.current = true;
 
-    let finalText = "";
+    const speaker = speakRef.current && ttsAvailable() ? new SentenceSpeaker({ lang, persona }) : null;
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const finalize = (patch: Partial<ChatMessage> & { id?: string }) => {
+      setMessages((prev) => prev.map((m) => (m.id === STREAMING_ID ? { ...m, ...patch } : m)));
+      setStreaming(false);
+      streamingRef.current = false;
+      abortRef.current = null;
+    };
+
     await streamChat(
       { conversationId: activeId, message: text, model },
       {
@@ -181,225 +180,92 @@ export default function ChatPage() {
           if (!activeId) setActiveId(cid);
         },
         onToken: (t) => {
-          finalText += t;
+          speaker?.push(t);
           setMessages((prev) => prev.map((m) => (m.id === STREAMING_ID ? { ...m, content: m.content + t } : m)));
+        },
+        onTool: (card) => {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== STREAMING_ID) return m;
+              const tools = [...(m.tools || [])];
+              const i = tools.findIndex((c) => c.id === card.id);
+              if (i >= 0) tools[i] = card;
+              else tools.push(card);
+              return { ...m, tools };
+            })
+          );
         },
         onDone: (msg) => {
           const done = msg as Message;
+          speaker?.flush();
+          finalize({ id: done.id, content: done.content, createdAt: done.createdAt });
+          loadConversations();
+        },
+        onAbort: () => {
+          finalize({ id: `a-${Date.now()}` });
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === STREAMING_ID
-                ? { id: done.id, role: "ASSISTANT", content: done.content, createdAt: done.createdAt }
+            prev.map((m, i) =>
+              i === prev.length - 1 && m.role === "ASSISTANT" && !m.content.endsWith("(interrumpido)")
+                ? { ...m, content: (m.content ? m.content + " " : "") + "— (interrumpido)" }
                 : m
             )
           );
-          setStreaming(false);
           loadConversations();
-          if (speakRef.current) speakReply(done.content || finalText);
         },
         onError: () => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === STREAMING_ID ? { ...m, content: "⚠️ No se pudo obtener respuesta. Inténtalo de nuevo." } : m
-            )
-          );
-          setStreaming(false);
+          speaker?.flush();
+          finalize({ id: `e-${Date.now()}`, content: "⚠️ No se pudo obtener respuesta. Inténtalo de nuevo." });
         },
-      }
+      },
+      true,
+      controller.signal
     );
   }
-
   sendRef.current = send;
 
-  const transcribe = useCallback(async (blob: Blob): Promise<string> => {
-    if (!blob || blob.size < 1400) return "";
-    const mime = hfMimeRef.current || blob.type || "audio/webm";
-    const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
-    const form = new FormData();
-    form.append("file", blob, `audio.${ext}`);
-    form.append("language", sttLang);
-    try {
-      const res = await api.postForm<{ text: string }>("/api/voice/transcribe", form);
-      return (res.text || "").trim();
-    } catch {
-      return "";
-    }
-  }, [sttLang]);
+  // ---------------- Hands-free (VAD + Whisper, any browser) with barge-in ----------------
+  const voice = useVoiceLoop({
+    enabled: handsFree,
+    sttLang,
+    isBusy: () => streamingRef.current,
+    onUtterance: (t) => sendRef.current(t),
+    onBargeIn: () => abortRef.current?.abort(),
+    onError: (m) => {
+      pushToast({ title: m, variant: "error" });
+      setHandsFree(false);
+    },
+  });
 
-  const stopHandsFree = useCallback(() => {
-    cancelAnimationFrame(hfRafRef.current);
-    try { if (hfRecRef.current?.state === "recording") hfRecRef.current.stop(); } catch { /* ignore */ }
-    hfRecRef.current = null;
-    hfStreamRef.current?.getTracks().forEach((t) => t.stop());
-    hfStreamRef.current = null;
-    try { void hfCtxRef.current?.close(); } catch { /* ignore */ }
-    hfCtxRef.current = null;
-    hfStateRef.current = "idle";
-    setHfAnalyser(null);
-  }, []);
-
-  // Browser-agnostic hands-free: mic + voice-activity detection + Whisper transcription.
-  useEffect(() => {
-    if (!handsFree) { stopHandsFree(); return; }
-    let cancelled = false;
-
-    (async () => {
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      } catch {
-        pushToast({ title: "No se pudo acceder al micrófono", variant: "error" });
-        setHandsFree(false);
-        return;
-      }
-      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-      hfStreamRef.current = stream;
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new AC();
-      hfCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      source.connect(analyser);
-      setHfAnalyser(analyser);
-      hfMimeRef.current = pickAudioMime();
-
-      const buf = new Uint8Array(analyser.fftSize);
-      const SILENCE_MS = 850;
-      const MAX_MS = 12000;
-      const MIN_VOICED_MS = 300; // below this it was a cough/click, not a sentence → don't spend Whisper quota
-      const CALIBRATE_MS = 800;
-      // Thresholds adapt to the room: calibrated from the noise floor, then tracked slowly.
-      let noiseFloor = 0.01;
-      let speechOn = 0.05;
-      let speechOff = 0.03;
-      const retune = () => {
-        speechOn = Math.min(0.2, Math.max(0.035, noiseFloor * 3.2));
-        speechOff = Math.min(0.14, Math.max(0.02, noiseFloor * 1.9));
-      };
-      const calStart = performance.now();
-      const calSamples: number[] = [];
-      let voicedMs = 0;
-      let lastFrame = performance.now();
-      let discard = false;
-      hfStateRef.current = "calibrating";
-      setHfCalibrating(true);
-
-      const startUtterance = () => {
-        try {
-          hfChunksRef.current = [];
-          const rec = hfMimeRef.current
-            ? new MediaRecorder(stream, { mimeType: hfMimeRef.current })
-            : new MediaRecorder(stream);
-          rec.ondataavailable = (e) => { if (e.data.size > 0) hfChunksRef.current.push(e.data); };
-          rec.onstop = async () => {
-            if (discard) { discard = false; hfStateRef.current = "listening"; return; }
-            const blob = new Blob(hfChunksRef.current, { type: hfMimeRef.current || "audio/webm" });
-            const text = await transcribe(blob);
-            if (!handsFreeRef.current) return;
-            let t = text;
-            if (t && t.length > 1) {
-              const low = t.toLowerCase();
-              const idx = low.indexOf("nova");
-              if (idx >= 0 && idx < 6) t = t.slice(idx + 4).replace(/^[\s,.:;!?-]+/, "").trim();
-            }
-            if (t && t.length > 1) { playListen(); sendRef.current(t); }
-            else hfStateRef.current = "listening";
-          };
-          rec.start();
-          hfRecRef.current = rec;
-        } catch {
-          hfStateRef.current = "listening";
-        }
-      };
-
-      const endUtterance = () => {
-        discard = voicedMs < MIN_VOICED_MS;
-        hfStateRef.current = "busy";
-        try { if (hfRecRef.current?.state === "recording") hfRecRef.current.stop(); } catch { /* ignore */ }
-      };
-
-      const frame = () => {
-        hfRafRef.current = requestAnimationFrame(frame);
-        const now = performance.now();
-        const dt = now - lastFrame;
-        lastFrame = now;
-        if (hfStateRef.current === "busy") return;
-        if (streamingRef.current || speakingRef.current) return;
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) { const x = (buf[i] - 128) / 128; sum += x * x; }
-        const rms = Math.sqrt(sum / buf.length);
-
-        if (hfStateRef.current === "calibrating") {
-          calSamples.push(rms);
-          if (now - calStart > CALIBRATE_MS) {
-            const sorted = [...calSamples].sort((a, b) => a - b);
-            noiseFloor = sorted[Math.floor(sorted.length * 0.6)] || 0.01; // robust to a stray spike
-            retune();
-            hfStateRef.current = "listening";
-            setHfCalibrating(false);
-            playListen();
-          }
-          return;
-        }
-
-        if (hfStateRef.current === "listening") {
-          if (rms > speechOn && now > cooldownRef.current) {
-            speechStartRef.current = now;
-            silenceStartRef.current = 0;
-            voicedMs = 0;
-            hfStateRef.current = "recording";
-            startUtterance();
-          } else if (rms < speechOn) {
-            // Slowly follow the room's background noise (fan, AC, street).
-            noiseFloor = noiseFloor * 0.995 + rms * 0.005;
-            retune();
-          }
-        } else if (hfStateRef.current === "recording") {
-          if (rms > speechOff) voicedMs += dt;
-          if (rms < speechOff) {
-            if (!silenceStartRef.current) silenceStartRef.current = now;
-            else if (now - silenceStartRef.current > SILENCE_MS) endUtterance();
-          } else {
-            silenceStartRef.current = 0;
-          }
-          if (now - speechStartRef.current > MAX_MS) endUtterance();
-        }
-      };
-      hfRafRef.current = requestAnimationFrame(frame);
-    })();
-
-    return () => { cancelled = true; setHfCalibrating(false); stopHandsFree(); };
-  }, [handsFree, transcribe, stopHandsFree, pushToast]);
-
+  // ---------------- Push-to-talk (Whisper) ----------------
   async function toggleMic() {
     if (recording) {
       recorderRef.current?.stop();
       return;
     }
-    const md = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
-    if (!md || !md.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (!voiceCaptureSupported()) {
       pushToast({ title: "Tu navegador no soporta grabación de audio", variant: "error" });
       return;
     }
     try {
-      const stream = await md.getUserMedia({ audio: true });
+      cancelAll();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       chunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
+      const mime = pickAudioMime();
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = async () => {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         setRecording(false);
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        const blob = new Blob(chunksRef.current, { type: mime || "audio/webm" });
         if (blob.size === 0) return;
         setTranscribing(true);
         try {
+          const ext = (mime || "webm").includes("mp4") ? "mp4" : (mime || "").includes("ogg") ? "ogg" : "webm";
           const form = new FormData();
-          form.append("file", blob, "audio.webm");
+          form.append("file", blob, `audio.${ext}`);
           form.append("language", sttLang);
           const res = await api.postForm<{ text: string }>("/api/voice/transcribe", form);
           const t = (res.text || "").trim();
@@ -421,17 +287,20 @@ export default function ChatPage() {
 
   return (
     <div className="grid h-[calc(100vh-7rem)] grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-      <aside className="hidden flex-col rounded-2xl border border-border bg-surface/60 lg:flex">
+      <aside className="hidden flex-col rounded-lg border border-border bg-surface/60 lg:flex">
         <button onClick={newConversation} className="nova-btn-primary m-3">
           <Plus className="h-4 w-4" /> Nueva conversación
         </button>
+        <Link href="/hud" className="nova-btn-ghost mx-3 mb-2">
+          <Crosshair className="h-4 w-4" /> Modo HUD
+        </Link>
         <div className="flex-1 space-y-1 overflow-y-auto px-2 pb-2">
           {conversations.map((c) => (
             <button
               key={c.id}
               onClick={() => selectConversation(c.id)}
               className={cn(
-                "group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition",
+                "group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition",
                 activeId === c.id ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-muted/40"
               )}
             >
@@ -446,15 +315,15 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      <section className="flex flex-col overflow-hidden rounded-2xl border border-border bg-surface/40">
+      <section className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface/40">
         <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6">
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
               <ArcReactor size={130} active={streaming} />
               <div>
-                <h2 className="text-xl font-semibold glow-text">NOVA está lista</h2>
+                <h2 className="text-xl font-semibold">NOVA está lista</h2>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Habla o escribe. Investigo IOCs, ejecuto acciones, programo y recuerdo lo importante.
+                  Habla o escribe. Investigo IOCs, ejecuto acciones y protocolos, programo y recuerdo lo importante.
                 </p>
               </div>
               <div className="grid max-w-lg grid-cols-1 gap-2 sm:grid-cols-2">
@@ -462,7 +331,7 @@ export default function ChatPage() {
                   <button
                     key={s}
                     onClick={() => send(s)}
-                    className="rounded-xl border border-border bg-background/40 px-3 py-2.5 text-left text-sm text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+                    className="rounded-md border border-border bg-background/40 px-3 py-2.5 text-left text-sm text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
                   >
                     {s}
                   </button>
@@ -482,7 +351,7 @@ export default function ChatPage() {
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="rounded-lg border border-border bg-background/60 px-2 py-1 text-xs outline-none focus:border-primary"
+                className="rounded-md border border-border bg-background/60 px-2 py-1 text-xs outline-none focus:border-primary"
               >
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
@@ -492,22 +361,22 @@ export default function ChatPage() {
           )}
           <div className="flex items-end gap-2">
             <button
-              onClick={() => setSpeakReplies((v) => { if (v) cancelSpeech(); return !v; })}
+              onClick={() => setSpeakReplies((v) => { if (v) cancelAll(); return !v; })}
               title={speakReplies ? "Voz activada" : "Voz desactivada"}
               className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border transition",
                 speakReplies ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                !ttsSupported() && "hidden"
+                !ttsAvailable() && "hidden"
               )}
             >
               {speakReplies ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
             </button>
 
             <button
-              onClick={() => setHandsFree((v) => !v)}
+              onClick={() => setHandsFree((v) => { if (v) cancelAll(); return !v; })}
               title={handsFree ? "Manos libres activo — habla con naturalidad" : "Modo manos libres (conversación por voz)"}
               className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border transition",
                 handsFree ? "border-primary/50 bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
                 !voiceOk && "hidden"
               )}
@@ -531,10 +400,10 @@ export default function ChatPage() {
 
             <button
               onClick={toggleMic}
-              disabled={transcribing}
+              disabled={transcribing || handsFree}
               title="Hablar (Whisper)"
               className={cn(
-                "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border transition",
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border transition",
                 recording ? "animate-pulse bg-danger/20 text-danger" : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -547,10 +416,8 @@ export default function ChatPage() {
           </div>
           {handsFree && (
             <div className="mt-2 flex flex-col items-center gap-1">
-              <VoiceWave active={handsFree} analyser={hfAnalyser} />
-              <p className="text-xs uppercase tracking-[0.14em] text-primary">
-                {hfCalibrating ? "Calibrando ruido ambiente… silencio un momento" : streaming || transcribing ? "Procesando…" : "Escuchando — habla con naturalidad"}
-              </p>
+              <VoiceWave active={handsFree} analyser={voice.analyser} />
+              <p className="text-xs uppercase tracking-[0.14em] text-primary">{PHASE_LABEL[voice.phase] || "Activando micrófono…"}</p>
             </div>
           )}
           {recording && <p className="mt-2 text-center text-xs text-danger">● Grabando… pulsa el micrófono para terminar</p>}
@@ -567,18 +434,25 @@ function MessageBubble({ message, streaming }: { message: ChatMessage; streaming
     <div className={cn("flex animate-fade-up gap-3", isUser && "flex-row-reverse")}>
       <div
         className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-semibold",
-          isUser ? "bg-accent/15 text-accent" : "bg-primary/15 text-primary"
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-sm font-semibold",
+          isUser ? "bg-muted text-foreground" : "bg-primary/15 text-primary"
         )}
       >
-        {isUser ? <UserIcon className="h-4 w-4" /> : "N"}
+        {isUser ? <UserIcon className="h-4 w-4" /> : <ArcReactor size={22} />}
       </div>
       <div
         className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
-          isUser ? "bg-accent/12 text-foreground" : "glass text-foreground"
+          "max-w-[80%] rounded-lg px-4 py-3 text-sm leading-relaxed",
+          isUser ? "bg-muted/60 text-foreground" : "glass text-foreground"
         )}
       >
+        {!isUser && message.tools && message.tools.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {message.tools.map((c) => (
+              <ToolChip key={c.id} card={c} />
+            ))}
+          </div>
+        )}
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (

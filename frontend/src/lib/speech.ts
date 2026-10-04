@@ -1,5 +1,7 @@
 "use client";
 
+import { SentenceSpeaker, cancelAll, onSpeakingChange, warmUpVoices } from "./tts";
+
 /* Lightweight wrappers around the Web Speech API (STT + TTS). */
 
 type AnyWindow = Window & {
@@ -43,49 +45,32 @@ export function ttsSupported(): boolean {
 
 /** Warm up the voice list (Chrome loads it asynchronously). Call once on mount. */
 export function preloadVoices(): void {
-  if (!ttsSupported()) return;
-  try {
-    window.speechSynthesis.getVoices();
-    window.speechSynthesis.addEventListener?.("voiceschanged", () => {
-      window.speechSynthesis.getVoices();
-    });
-  } catch {
-    /* ignore */
-  }
+  warmUpVoices();
 }
 
-export function speak(text: string, lang = "es-ES", onEnd?: () => void): void {
+/**
+ * Speak a whole text (interrupting anything in progress), sentence by sentence with the
+ * personality's voice. onEnd fires when NOVA finishes talking (or immediately if TTS is unavailable).
+ */
+export function speak(text: string, lang = "es-ES", onEnd?: () => void, persona = "JARVIS"): void {
   if (!ttsSupported() || !text) {
     onEnd?.();
     return;
   }
-  const synth = window.speechSynthesis;
-  synth.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang;
-  utterance.rate = 1.02;
-  utterance.pitch = 1.0;
-  const base = lang.slice(0, 2);
-  const voices = synth.getVoices();
-  const preferred =
-    voices.find((v) => v.lang.startsWith(base) && /google|microsoft|nova|helena|sabina|female/i.test(v.name)) ||
-    voices.find((v) => v.lang.startsWith(base));
-  if (preferred) utterance.voice = preferred;
+  cancelAll();
   if (onEnd) {
-    utterance.onend = onEnd;
-    utterance.onerror = onEnd;
+    const off = onSpeakingChange((speaking) => {
+      if (!speaking) {
+        off();
+        onEnd();
+      }
+    });
   }
-  synth.speak(utterance);
-  // Chrome occasionally parks the queue; nudge it back to playing.
-  window.setTimeout(() => {
-    try {
-      if (synth.paused) synth.resume();
-    } catch {
-      /* ignore */
-    }
-  }, 250);
+  const s = new SentenceSpeaker({ lang, persona });
+  s.push(text);
+  s.flush();
 }
 
 export function cancelSpeech(): void {
-  if (ttsSupported()) window.speechSynthesis.cancel();
+  cancelAll();
 }

@@ -104,3 +104,6 @@ nova:
   soc:
     virustotal:
       api-key: ${NOVA_SOC_VIRUSTOTAL_API_KEY:}
+    kev-watch:
+      enabled: ${NOVA_SOC_KEV_WATCH_ENABLED:true}
+      vendors: "${NOVA_SOC_KEV_WATCH_VENDORS:Fortinet,Microsoft,Cisco,Palo Alto,Ivanti,Citrix,VMware,Apache,Linux,Google,Apple,Oracle,SonicWall,Juniper,Atlassian}"
