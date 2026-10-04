@@ -38,10 +38,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       >
         <div className="flex items-center justify-between px-5 py-5">
           <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-            <ArcReactor size={34} />
+            <ArcReactor size={30} />
             <div>
               <p className="text-sm font-semibold leading-tight tracking-[0.24em]">NOVA</p>
-              <p className="nova-label mt-0.5">Assistant</p>
+              <p className="nova-label mt-0.5">Rivas Industries</p>
             </div>
           </Link>
           <button className="text-muted-foreground md:hidden" onClick={onClose}>

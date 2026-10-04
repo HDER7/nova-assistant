@@ -1,9 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <rect width="120" height="120" rx="26" fill="#0b0f16"/>
-  <rect x="27" y="32" width="7" height="60" fill="#E10600"/>
-  <g fill="#ECECEC" transform="translate(21 9) scale(0.78)">
-    <rect x="30" y="24" width="15" height="72" rx="2"/>
-    <path fill-rule="evenodd" d="M45 24H63c16 0 25 9 25 24s-9 24-25 24H45Zm0 14v20h17c8 0 12-4 12-10s-4-10-12-10Z"/>
-    <path d="M52 60h12l22 36H74Z"/>
+  <defs>
+    <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="120">
+      <rect width="120" height="120" fill="white"/>
+      <g transform="translate(-2.4 10.6) scale(0.52)">
+        <g fill="black" transform="translate(55 10) scale(1.1)">
+          <rect x="30" y="24" width="15" height="72" rx="2"/>
+          <path fill-rule="evenodd" d="M45 24H63c16 0 25 9 25 24s-9 24-25 24H45Zm0 14v20h17c8 0 12-4 12-10s-4-10-12-10Z"/>
+          <path d="M52 60h12l22 36H74Z"/>
+        </g>
+        <rect x="53" y="38" width="6" height="64" fill="black"/>
+        <rect x="181" y="38" width="6" height="64" fill="black"/>
+      </g>
+    </mask>
+  </defs>
+  <rect width="120" height="120" rx="24" fill="#E10600"/>
+  <g mask="url(#m)" fill="#0a0a0a" transform="translate(0 0)">
+    <g transform="translate(-2.4 10.6) scale(0.52)">
+      <path d="M40 22 H200 V104 Q200 126 176 130 Q140 136 120 188 Q100 136 64 130 Q40 126 40 104 Z"/>
+      <path d="M40 23 L40 2 L60 23 Z"/>
+      <path d="M200 23 L200 2 L180 23 Z"/>
+    </g>
   </g>
 </svg>

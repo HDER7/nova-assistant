@@ -103,7 +103,9 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
-        <ArcReactor size={150} active className="shrink-0 self-center" />
+        <div className="shrink-0 self-center rounded-md bg-primary p-6 shadow-[0_0_40px_-12px_hsl(var(--primary))]">
+          <ArcReactor size={118} tone="dark" />
+        </div>
       </section>
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">

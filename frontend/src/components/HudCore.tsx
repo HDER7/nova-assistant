@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { onSpeechPulse } from "@/lib/tts";
+import { ArcReactor } from "@/components/ArcReactor";
 import type { VoicePhase } from "@/lib/useVoiceLoop";
 
 /**
@@ -119,14 +120,9 @@ export function HudCore({
       <circle ref={ringRef} r="118" fill="none" stroke="hsl(var(--primary))" strokeOpacity="0.4" strokeWidth="1" />
       <circle r="86" fill="hsl(var(--background))" fillOpacity="0.55" stroke="hsl(var(--border))" />
 
-      {/* Rivas mark */}
-      <g transform="translate(-44 -48) scale(0.8)">
-        <rect x="14" y="26" width="6" height="68" fill="hsl(var(--primary))" />
-        <g fill="hsl(var(--foreground))" transform="translate(12 4) scale(0.92)">
-          <rect x="30" y="24" width="15" height="72" rx="2" />
-          <path fillRule="evenodd" d="M45 24H63c16 0 25 9 25 24s-9 24-25 24H45Zm0 14v20h17c8 0 12-4 12-10s-4-10-12-10Z" />
-          <path d="M52 60h12l22 36H74Z" />
-        </g>
+      {/* Rivas Industries crest */}
+      <g transform="translate(-52 -58)">
+        <ArcReactor size={104} />
       </g>
     </svg>
   );
