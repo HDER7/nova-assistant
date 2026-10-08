@@ -148,6 +148,20 @@ public class AiPersistence {
         return MessageResponse.from(assistant);
     }
 
+    /** System prompt for a Gemini Live voice session: same persona/memory, tuned for real-time speech. */
+    public String liveSystemPrompt(UUID userId) {
+        return systemPrompt(userId) + """
+
+                MODO VOZ EN TIEMPO REAL: estás hablando, no escribiendo. Frases cortas y naturales, sin markdown,
+                sin listas, sin leer URLs ni símbolos. Si te interrumpen, detente y atiende lo nuevo.
+                Para acciones (tareas, recordatorios, notas, eventos, consultas SOC) usa siempre las herramientas.
+                """;
+    }
+
+    public String personaOf(UUID userId) {
+        return userRepository.findById(userId).map(u -> personaKey(u.getPersona())).orElse("JARVIS");
+    }
+
     private String systemPrompt(UUID userId) {
         StringBuilder sb = new StringBuilder(CORE);
         var user = userRepository.findById(userId);

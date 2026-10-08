@@ -82,6 +82,17 @@ nova:
       strong: ${NOVA_AI_MODELS_STRONG:openai/gpt-oss-120b}
       catalog: "${NOVA_AI_MODELS_CATALOG:openai/gpt-oss-120b|GPT-OSS 120B (potente),openai/gpt-oss-20b|GPT-OSS 20B (rápido),qwen/qwen3.8-27b|Qwen 3.8 27B}"
       whisper: ${NOVA_AI_MODELS_WHISPER:whisper-large-v3}
+    gemini:
+      api-key: ${NOVA_AI_GEMINI_API_KEY:}
+      chat-model: ${NOVA_AI_GEMINI_CHAT_MODEL:gemini-3.8-flash}
+      vision-model: ${NOVA_AI_GEMINI_VISION_MODEL:gemini-3.8-flash}
+      notebook-model: ${NOVA_AI_GEMINI_NOTEBOOK_MODEL:gemini-3.8-flash}
+      tts-model: ${NOVA_AI_GEMINI_TTS_MODEL:gemini-3.8-flash-lite-tts}
+      podcast-tts-model: ${NOVA_AI_GEMINI_PODCAST_TTS_MODEL:gemini-3.8-flash-tts}
+      live-model: ${NOVA_AI_GEMINI_LIVE_MODEL:gemini-3.8-live}
+      fallback: ${NOVA_AI_GEMINI_FALLBACK:true}
+      tts: ${NOVA_AI_GEMINI_TTS:true}
+      live: ${NOVA_AI_GEMINI_LIVE:true}
     local:
       enabled: ${NOVA_AI_LOCAL_ENABLED:true}
       base-url: ${NOVA_AI_LOCAL_BASE_URL:http://localhost:8000/v1}

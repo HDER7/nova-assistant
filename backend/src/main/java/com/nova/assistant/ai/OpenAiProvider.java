@@ -74,8 +74,9 @@ public class OpenAiProvider implements AiProvider {
         body.put("model", effective);
         body.put("temperature", temperature);
         body.put("max_tokens", maxTokens);
-        if (effective != null && effective.contains("gpt-oss")) {
-            // Reasoning models spend completion tokens thinking; keep it short so the answer isn't cut off.
+        if (effective != null && (effective.contains("gpt-oss") || effective.startsWith("gemini-3"))) {
+            // Reasoning models spend completion tokens thinking; keep it short so the answer isn't cut off
+            // and the voice starts sooner.
             body.put("reasoning_effort", "low");
         }
         body.put("messages", messages);
@@ -163,6 +164,10 @@ public class OpenAiProvider implements AiProvider {
                                         return m;
                                     });
                                     if (tc.hasNonNull("id")) acc.put("id", tc.get("id").asText());
+                                    // Gemini 3 attaches a thought signature here; it must be sent back verbatim.
+                                    if (tc.has("extra_content")) {
+                                        acc.put("extra_content", MAPPER.convertValue(tc.get("extra_content"), Map.class));
+                                    }
                                     Map<String, Object> f = (Map<String, Object>) acc.get("function");
                                     JsonNode fn = tc.path("function");
                                     if (fn.hasNonNull("name") && f.get("name").toString().isEmpty()) {

@@ -8,5 +8,7 @@ import java.util.UUID;
 public record ChatRequest(
         UUID conversationId,
         @NotBlank @Size(max = 8000) String message,
-        String model
+        String model,
+        /** Optional attached image as a data URL (data:image/jpeg;base64,...). Analysed with Gemini vision. */
+        String image
 ) {}

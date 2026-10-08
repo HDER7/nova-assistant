@@ -44,6 +44,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/auth/")) {
             bucket = "auth";
             limit = cfg.getAuthPerMinute();
+        } else if (path.startsWith("/api/voice/speak")) {
+            // One answer is spoken in a few chunks: give the voice its own, larger budget.
+            bucket = "tts";
+            limit = cfg.getAiPerMinute() * 3;
         } else if (isAiPath(path, request.getMethod())) {
             bucket = "ai";
             limit = cfg.getAiPerMinute();
@@ -83,7 +87,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private boolean isAiPath(String path, String method) {
         if (!"POST".equalsIgnoreCase(method)) return false;
-        return path.startsWith("/api/chat") || path.startsWith("/api/voice") || path.startsWith("/api/soc");
+        return path.startsWith("/api/chat") || path.startsWith("/api/voice") || path.startsWith("/api/soc")
+                || path.startsWith("/api/live")
+                || (path.startsWith("/api/notebooks") && (path.endsWith("/ask") || path.endsWith("/audio")));
     }
 
     private String clientIp(HttpServletRequest request) {

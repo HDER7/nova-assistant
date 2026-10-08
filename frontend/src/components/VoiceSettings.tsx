@@ -1,8 +1,13 @@
 "use client";
 
+import { cn } from "@/lib/utils";
+
 import { useEffect, useState } from "react";
 import { AudioLines, Play } from "lucide-react";
-import { listVoices, pickVoice, preferredVoiceURI, setPreferredVoiceURI, cancelAll, ttsAvailable, warmUpVoices } from "@/lib/tts";
+import {
+  listVoices, pickVoice, preferredVoiceURI, setPreferredVoiceURI, cancelAll, ttsAvailable, warmUpVoices,
+  neuralVoiceAvailable, preferredEngine, setPreferredEngine, unlockAudio, type TtsEngine,
+} from "@/lib/tts";
 import { speak } from "@/lib/speech";
 import { announcementsEnabled, setAnnouncementsEnabled } from "@/components/ProactiveAnnouncer";
 
@@ -17,6 +22,8 @@ export function VoiceSettings({ persona, lang }: { persona: string; lang: string
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [chosen, setChosen] = useState("");
   const [announce, setAnnounce] = useState(true);
+  const [engine, setEngine] = useState<TtsEngine>("gemini");
+  const [neural, setNeural] = useState(false);
 
   useEffect(() => {
     warmUpVoices();
@@ -24,8 +31,12 @@ export function VoiceSettings({ persona, lang }: { persona: string; lang: string
     load();
     setChosen(preferredVoiceURI());
     setAnnounce(announcementsEnabled());
+    setEngine(preferredEngine());
+    setNeural(neuralVoiceAvailable());
+    const t = window.setTimeout(() => setNeural(neuralVoiceAvailable()), 1500);
     if (ttsAvailable()) window.speechSynthesis.addEventListener?.("voiceschanged", load);
     return () => {
+      window.clearTimeout(t);
       if (ttsAvailable()) window.speechSynthesis.removeEventListener?.("voiceschanged", load);
     };
   }, [lang]);
@@ -39,7 +50,37 @@ export function VoiceSettings({ persona, lang }: { persona: string; lang: string
   return (
     <section className="nova-card space-y-4">
       <h2 className="flex items-center gap-2 font-semibold"><AudioLines className="h-4 w-4 text-primary" /> Voz de NOVA</h2>
-      {!ttsAvailable() ? (
+      {neural && (
+        <div>
+          <label className="mb-1.5 block text-xs text-muted-foreground">Motor de voz</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { id: "gemini", title: "Gemini (neuronal)", desc: "Voz de estudio de Google, distinta por personalidad." },
+              { id: "browser", title: "Navegador", desc: "Voces del sistema. Sin cuota, menos natural." },
+            ] as const).map((o) => (
+              <button
+                type="button"
+                key={o.id}
+                onClick={() => {
+                  setEngine(o.id);
+                  setPreferredEngine(o.id);
+                }}
+                className={cn(
+                  "rounded-md border p-2 text-left transition",
+                  engine === o.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/40"
+                )}
+              >
+                <span className="block text-xs font-semibold">{o.title}</span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{o.desc}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Si se agota la cuota gratuita de Gemini, NOVA pasa sola a la voz del navegador durante un rato.
+          </p>
+        </div>
+      )}
+      {!ttsAvailable() && !neural ? (
         <p className="text-sm text-muted-foreground">Tu navegador no permite síntesis de voz.</p>
       ) : (
         <>
@@ -63,7 +104,7 @@ export function VoiceSettings({ persona, lang }: { persona: string; lang: string
               </select>
               <button
                 type="button"
-                onClick={() => { cancelAll(); speak(SAMPLE[persona] || SAMPLE.JARVIS, lang, undefined, persona); }}
+                onClick={() => { cancelAll(); unlockAudio(); speak(SAMPLE[persona] || SAMPLE.JARVIS, lang, undefined, persona); }}
                 className="nova-btn-ghost shrink-0"
                 title="Probar voz"
               >

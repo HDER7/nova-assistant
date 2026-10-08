@@ -39,6 +39,9 @@ public class AiService {
     private final ToolService toolService;
     private final RestClient.Builder restClientBuilder;
     private final com.nova.assistant.protocol.ProtocolService protocolService;
+    private final com.nova.assistant.gemini.GeminiService gemini;
+
+    private static final String GEMINI = "gemini:";
 
     /** Lazily-built local engine (OpenJarvis/Ollama), created on first use from config. */
     private volatile OpenAiProvider localEngine;
@@ -74,9 +77,11 @@ public class AiService {
 
     public ChatResponse chat(UUID userId, ChatRequest req) {
         String message = req.message().trim();
-        ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
+        String image = validImage(req.image());
+        String stored = image == null ? message : message + "\n\n_(imagen adjunta)_";
+        ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), stored);
         String answer = generateAgentic(userId, withProtocol(userId, ctx.messages(), message),
-                resolveEngine(req.model(), message), null, null);
+                resolveEngine(req.model(), message), null, null, image);
         MessageResponse mr = persistence.finishAssistantTurn(userId, ctx.conversationId(), answer, message);
         return new ChatResponse(ctx.conversationId(), mr);
     }
@@ -90,15 +95,17 @@ public class AiService {
         SseEmitter emitter = new SseEmitter(180_000L);
         String message = req.message().trim();
         Engine engine = resolveEngine(req.model(), message);
+        String image = validImage(req.image());
+        String stored = image == null ? message : message + "\n\n_(imagen adjunta)_";
         executor.execute(() -> {
             AtomicBoolean gone = new AtomicBoolean(false);
             try {
-                ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), message);
+                ProviderContext ctx = persistence.prepareUserTurn(userId, req.conversationId(), stored);
                 send(emitter, gone, "meta", Map.of("conversationId", ctx.conversationId().toString()));
                 AtomicBoolean streamed = new AtomicBoolean(false);
                 String answer = generateAgentic(userId, withProtocol(userId, ctx.messages(), message), engine,
                         t -> { streamed.set(true); send(emitter, gone, "token", Map.of("t", t)); },
-                        card -> send(emitter, gone, "tool", card));
+                        card -> send(emitter, gone, "tool", card), image);
                 if (!streamed.get()) {
                     // Explanations / offline brain arrive whole: drip them so the UI and voice behave the same.
                     for (String token : tokenize(answer)) {
@@ -124,6 +131,15 @@ public class AiService {
         } catch (Exception e) {
             gone.set(true); // browser closed the stream (e.g. the user interrupted NOVA)
         }
+    }
+
+    /** Accepts a data:image/...;base64 URL up to ~6 MB; anything else is ignored. */
+    private static String validImage(String image) {
+        if (image == null || image.isBlank()) return null;
+        if (!image.startsWith("data:image/") || !image.contains(";base64,")) return null;
+        if (image.length() > 8_000_000) throw new com.nova.assistant.common.ApiException(
+                org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE, "La imagen es demasiado grande (máx. ~6 MB).");
+        return image;
     }
 
     /** If the user invoked a protocol ("protocolo inicio de turno"), swap the last user turn for its instructions. */
@@ -161,6 +177,13 @@ public class AiService {
         out.put("live", provider.live());
         out.put("model", properties.getAi().getOpenai().getModel());
         out.put("local", localInfo);
+        Map<String, Object> g = new HashMap<>();
+        g.put("available", gemini.available());
+        g.put("fallback", gemini.available() && properties.getAi().getGemini().isFallback());
+        g.put("tts", gemini.ttsAvailable());
+        g.put("live", gemini.liveAvailable());
+        g.put("vision", gemini.available());
+        out.put("gemini", g);
         return out;
     }
 
@@ -198,7 +221,8 @@ public class AiService {
     private String generate(List<ChatMessage> messages) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
-        if (!(provider instanceof OpenAiProvider openAi)) {
+        OpenAiProvider openAi = (provider instanceof OpenAiProvider o) ? o : null;
+        if (openAi == null) {
             return fallback.complete(messages, temperature, maxTokens);
         }
         List<Map<String, Object>> msgs = new ArrayList<>();
@@ -209,7 +233,8 @@ public class AiService {
             msgs.add(mm);
         }
         Exception last = null;
-        for (String candidate : candidates(null)) {
+        // SOC triage / phishing / document analysis never fall back to Gemini (free tier may train on inputs).
+        for (String candidate : candidates(null, false)) {
             try {
                 Map<String, Object> msg = openAi.chatRaw(msgs, null, temperature, maxTokens, candidate);
                 Object content = msg.get("content");
@@ -226,9 +251,11 @@ public class AiService {
     }
 
     /** Ordered, de-duplicated list of models to try: requested → default → strong → fast → rest of catalog. */
-    private List<String> candidates(String requested) {
+    private List<String> candidates(String requested, boolean includeGemini) {
         java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
         if (requested != null && !requested.isBlank()) out.add(requested);
+        boolean geminiOk = gemini.available();
+        if (requested != null && requested.startsWith(GEMINI) && !geminiOk) out.remove(requested);
         out.add(""); // "" = provider's configured default model
         AppProperties.Models mc = properties.getAi().getModels();
         if (mc.getStrong() != null && !mc.getStrong().isBlank()) out.add(mc.getStrong());
@@ -242,11 +269,22 @@ public class AiService {
             list.add(m.isEmpty() ? null : m);
             if (list.size() >= MAX_MODEL_ATTEMPTS) break;
         }
+        // Last resort: Gemini (separate free quota) when every Groq model is rate-limited or down.
+        String g = GEMINI + properties.getAi().getGemini().getChatModel();
+        if (includeGemini && geminiOk && properties.getAi().getGemini().isFallback() && !list.contains(g)) list.add(g);
         return list;
+    }
+
+    private static boolean isGemini(String candidate) {
+        return candidate != null && candidate.startsWith(GEMINI);
     }
 
     private String label(String model) {
         return model == null ? properties.getAi().getOpenai().getModel() : model;
+    }
+
+    private void logFallback(String candidate) {
+        if (isGemini(candidate)) log.info("Answering with Gemini fallback ({})", candidate);
     }
 
     private void logFailure(String model, Exception e) {
@@ -277,7 +315,8 @@ public class AiService {
                 return "⚠️ La clave del proveedor de IA no es válida (¿la rotaste?). Actualiza NOVA_AI_OPENAI_API_KEY en Render.";
             }
             if (s == 429) {
-                return "⚠️ Se alcanzó el límite de uso del plan gratuito de Groq en todos los modelos disponibles. Espera un minuto e inténtalo de nuevo.";
+                return "⚠️ Se alcanzó el límite de uso de los planes gratuitos (Groq" + (gemini.available() ? " y Gemini" : "")
+                        + ") en todos los modelos disponibles. Espera un minuto e inténtalo de nuevo.";
             }
             if (s == 413 || body.contains("too large") || body.contains("context_length")) {
                 return "⚠️ La petición es demasiado grande para el plan gratuito. Prueba con un texto más corto o abre una conversación nueva.";
@@ -290,19 +329,22 @@ public class AiService {
     }
 
     private String generateAgentic(UUID userId, List<ChatMessage> baseMessages, Engine engine,
-                                   Consumer<String> onToken, Consumer<Map<String, Object>> onTool) {
+                                   Consumer<String> onToken, Consumer<Map<String, Object>> onTool, String image) {
         double temperature = properties.getAi().getOpenai().getTemperature();
         int maxTokens = properties.getAi().getOpenai().getMaxTokens();
         String model = engine.model();
         OpenAiProvider openAi = engine.openAi();
 
-        if (openAi == null) {
+        if (image != null && !gemini.available()) {
+            return "Para analizar imágenes necesito Gemini. Configura NOVA_AI_GEMINI_API_KEY en Render y vuelve a intentarlo.";
+        }
+        if (openAi == null && !gemini.available()) {
             try { return provider.complete(baseMessages, temperature, maxTokens); }
             catch (Exception e) { return fallback.complete(baseMessages, temperature, maxTokens); }
         }
-        if (engine.local()) {
+        if (engine.local() && image == null) {
             try {
-                return runAgentic(userId, baseMessages, openAi, model, temperature, maxTokens, onToken, onTool);
+                return runAgentic(userId, baseMessages, openAi, model, temperature, maxTokens, onToken, onTool, null);
             } catch (Exception e) {
                 logFailure(model, e);
                 return "No consigo contactar con el motor local en " + properties.getAi().getLocal().getBaseUrl()
@@ -311,7 +353,14 @@ public class AiService {
         }
         // Cloud: walk the model chain so a retired or rate-limited model doesn't break the conversation.
         Exception last = null;
-        for (String candidate : candidates(model)) {
+        List<String> chain = image != null
+                ? List.of(GEMINI + properties.getAi().getGemini().getVisionModel())   // vision = Gemini only
+                : candidates(model, true);
+        for (String candidate : chain) {
+            OpenAiProvider target = isGemini(candidate) ? gemini.chat() : openAi;
+            String targetModel = isGemini(candidate) ? candidate.substring(GEMINI.length()) : candidate;
+            if (target == null) continue;
+            logFallback(candidate);
             AtomicBoolean emitted = new AtomicBoolean(false);
             StringBuilder partial = new StringBuilder();
             Consumer<String> tracked = onToken == null ? null : t -> {
@@ -320,7 +369,7 @@ public class AiService {
                 onToken.accept(t);
             };
             try {
-                String text = runAgentic(userId, baseMessages, openAi, candidate, temperature, maxTokens, tracked, onTool);
+                String text = runAgentic(userId, baseMessages, target, targetModel, temperature, maxTokens, tracked, onTool, image);
                 if (text != null && !text.isBlank()) return text;
                 last = new IllegalStateException("respuesta vacia de " + label(candidate));
             } catch (PartialTurnException p) {
@@ -354,7 +403,7 @@ public class AiService {
      */
     private String runAgentic(UUID userId, List<ChatMessage> baseMessages, OpenAiProvider openAi, String model,
                               double temperature, int maxTokens,
-                              Consumer<String> onToken, Consumer<Map<String, Object>> onTool) {
+                              Consumer<String> onToken, Consumer<Map<String, Object>> onTool, String image) {
         boolean toolsRan = false;
         StringBuilder spoken = new StringBuilder();
         boolean[] needsGap = {false};
@@ -375,6 +424,7 @@ public class AiService {
                 mm.put("content", m.content());
                 msgs.add(mm);
             }
+            if (image != null) attachImage(msgs, image);
             List<Map<String, Object>> tools = toolService.toolSpecs();
             for (int iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
                 Map<String, Object> assistant = sink == null
@@ -417,6 +467,21 @@ public class AiService {
         } catch (RuntimeException e) {
             if (toolsRan) throw new PartialTurnException(e);
             throw e;
+        }
+    }
+
+    /** Turns the last user message into a multimodal [text, image] message (OpenAI format, accepted by Gemini). */
+    private static void attachImage(List<Map<String, Object>> msgs, String dataUrl) {
+        for (int k = msgs.size() - 1; k >= 0; k--) {
+            Map<String, Object> m = msgs.get(k);
+            if ("user".equals(m.get("role"))) {
+                String text = String.valueOf(m.get("content"));
+                List<Map<String, Object>> parts = new ArrayList<>();
+                parts.add(Map.of("type", "text", "text", text));
+                parts.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
+                m.put("content", parts);
+                return;
+            }
         }
     }
 

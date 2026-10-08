@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, MessageSquare, CheckSquare, StickyNote,
-  CalendarDays, BrainCircuit, Settings, Wand2, ShieldAlert, X, Crosshair,
+  CalendarDays, BrainCircuit, Settings, Wand2, ShieldAlert, X, Crosshair, BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArcReactor } from "@/components/ArcReactor";
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/hud", label: "HUD", icon: Crosshair },
   { href: "/tasks", label: "Tareas", icon: CheckSquare },
   { href: "/notes", label: "Notas", icon: StickyNote },
+  { href: "/notebooks", label: "Cuadernos", icon: BookOpen },
   { href: "/calendar", label: "Calendario", icon: CalendarDays },
   { href: "/memory", label: "Memoria", icon: BrainCircuit },
   { href: "/tools", label: "Herramientas", icon: Wand2 },

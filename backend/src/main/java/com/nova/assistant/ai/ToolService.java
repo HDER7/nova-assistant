@@ -104,6 +104,11 @@ public class ToolService {
         return tools;
     }
 
+    /** HUD card for a finished tool call (used by Gemini Live, whose tools run outside the chat loop). */
+    public Map<String, Object> card(String id, String name, String argsJson, String result) {
+        return ToolCards.done(id, name, argsJson, result);
+    }
+
     public String execute(UUID userId, String name, String argsJson) {
         try {
             JsonNode a = (argsJson == null || argsJson.isBlank()) ? mapper.createObjectNode() : mapper.readTree(argsJson);

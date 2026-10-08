@@ -99,7 +99,7 @@ export interface StreamHandlers {
 }
 
 export async function streamChat(
-  body: { conversationId?: string | null; message: string; model?: string | null },
+  body: { conversationId?: string | null; message: string; model?: string | null; image?: string | null },
   handlers: StreamHandlers,
   retry = true,
   signal?: AbortSignal

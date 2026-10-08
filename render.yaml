@@ -27,6 +27,9 @@ services:
         value: openai/gpt-oss-20b
       - key: NOVA_AI_OPENAI_API_KEY
         sync: false
+      # --- Google Gemini (free tier): fallback brain, vision, neural voice, notebooks, Live ---
+      - key: NOVA_AI_GEMINI_API_KEY
+        sync: false
       # Local brain (OpenJarvis/Ollama) can't be reached from Render's cloud — keep it off here.
       - key: NOVA_AI_LOCAL_ENABLED
         value: "false"

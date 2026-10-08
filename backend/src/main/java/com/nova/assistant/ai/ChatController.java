@@ -52,6 +52,10 @@ public class ChatController {
             String label = bar > 0 ? e.substring(bar + 1).trim() : e;
             if (!id.isEmpty()) models.add(Map.of("id", id, "label", label));
         }
+        AppProperties.Gemini g = properties.getAi().getGemini();
+        if (g.available()) {
+            models.add(Map.of("id", "gemini:" + g.getChatModel(), "label", "Gemini " + g.getChatModel().replace("gemini-", "") + " (Google)"));
+        }
         AppProperties.Local local = properties.getAi().getLocal();
         if (local.isEnabled()) {
             models.add(Map.of("id", "local", "label", local.getLabel() + " · privado/offline"));

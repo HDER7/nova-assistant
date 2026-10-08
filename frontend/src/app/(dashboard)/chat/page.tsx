@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon, Radio, Crosshair,
+  Send, Mic, Plus, Loader2, Volume2, VolumeX, Trash2, MessageSquare, User as UserIcon, Radio, Crosshair, ImagePlus, X,
 } from "lucide-react";
 import { api, streamChat } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
@@ -12,9 +12,10 @@ import { ArcReactor } from "@/components/ArcReactor";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { VoiceWave } from "@/components/VoiceWave";
 import { ToolChip } from "@/components/HoloCard";
-import { SentenceSpeaker, cancelAll, ttsAvailable, warmUpVoices } from "@/lib/tts";
+import { SentenceSpeaker, cancelAll, unlockAudio, ttsAvailable, warmUpVoices } from "@/lib/tts";
 import { useVoiceLoop, voiceCaptureSupported, type VoicePhase } from "@/lib/useVoiceLoop";
 import { playBlip } from "@/lib/sound";
+import { imageToDataUrl } from "@/lib/image";
 import type { Conversation, Message, ToolCard } from "@/lib/types";
 import { cn, relativeTime } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ interface ChatMessage {
   content: string;
   createdAt?: string;
   tools?: ToolCard[];
+  image?: string;
 }
 
 const STREAMING_ID = "__streaming__";
@@ -71,6 +73,9 @@ export default function ChatPage() {
   const [voiceOk, setVoiceOk] = useState(false);
   const [model, setModel] = useState("auto");
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  const [image, setImage] = useState<string | null>(null);
+  const [visionOk, setVisionOk] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const endRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -121,7 +126,21 @@ export default function ChatPage() {
 
   useEffect(() => {
     api.get<{ models: { id: string; label: string }[] }>("/api/chat/models").then((r) => setModels(r.models)).catch(() => {});
+    api.get<{ gemini?: { vision?: boolean } }>("/api/chat/status").then((r) => setVisionOk(!!r.gemini?.vision)).catch(() => {});
   }, []);
+
+  async function attachImage(file: File | Blob | null | undefined) {
+    if (!file) return;
+    if (!visionOk) {
+      pushToast({ title: "El análisis de imágenes requiere configurar Gemini", variant: "error" });
+      return;
+    }
+    try {
+      setImage(await imageToDataUrl(file));
+    } catch {
+      pushToast({ title: "No se pudo leer la imagen", variant: "error" });
+    }
+  }
 
   useEffect(() => () => cancelAll(), []);
 
@@ -148,17 +167,21 @@ export default function ChatPage() {
   }
 
   async function send(textArg?: string) {
-    const text = (textArg ?? input).trim();
+    const attached = textArg === undefined ? image : null;
+    let text = (textArg ?? input).trim();
+    if (!text && attached) text = "Analiza esta imagen. Si es una alerta, un log o un correo, evalúa el riesgo e indica qué hacer.";
     if (!text || streamingRef.current) return;
     playBlip();
     cancelAll();
+    unlockAudio();
 
     setMessages((prev) => [
       ...prev,
-      { id: `u-${Date.now()}`, role: "USER", content: text },
+      { id: `u-${Date.now()}`, role: "USER", content: text, image: attached || undefined },
       { id: STREAMING_ID, role: "ASSISTANT", content: "", tools: [] },
     ]);
     setInput("");
+    setImage(null);
     setStreaming(true);
     streamingRef.current = true;
 
@@ -174,7 +197,7 @@ export default function ChatPage() {
     };
 
     await streamChat(
-      { conversationId: activeId, message: text, model },
+      { conversationId: activeId, message: text, model, image: attached },
       {
         onMeta: (cid) => {
           if (!activeId) setActiveId(cid);
@@ -359,7 +382,43 @@ export default function ChatPage() {
               </select>
             </div>
           )}
+          {image && (
+            <div className="mb-2 flex items-center gap-2">
+              <div className="relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image} alt="Imagen adjunta" className="h-16 w-16 rounded-md border border-border object-cover" />
+                <button
+                  onClick={() => setImage(null)}
+                  className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-background text-muted-foreground ring-1 ring-border hover:text-foreground"
+                  title="Quitar imagen"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">Imagen adjunta · se analiza con Gemini (Google)</p>
+            </div>
+          )}
           <div className="flex items-end gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                attachImage(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              title="Adjuntar imagen (o pega una captura con Ctrl+V)"
+              className={cn(
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition hover:text-foreground",
+                !visionOk && "hidden"
+              )}
+            >
+              <ImagePlus className="h-5 w-5" />
+            </button>
             <button
               onClick={() => setSpeakReplies((v) => { if (v) cancelAll(); return !v; })}
               title={speakReplies ? "Voz activada" : "Voz desactivada"}
@@ -393,6 +452,13 @@ export default function ChatPage() {
                   send();
                 }
               }}
+              onPaste={(e) => {
+                const item = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+                if (item) {
+                  e.preventDefault();
+                  attachImage(item.getAsFile());
+                }
+              }}
               rows={1}
               placeholder="Escribe un mensaje a NOVA…"
               className="nova-input max-h-40 min-h-[44px] flex-1 resize-none py-3"
@@ -410,7 +476,7 @@ export default function ChatPage() {
               {transcribing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
             </button>
 
-            <button onClick={() => send()} disabled={streaming || !input.trim()} className="nova-btn-primary h-11 w-11 shrink-0 !px-0">
+            <button onClick={() => send()} disabled={streaming || (!input.trim() && !image)} className="nova-btn-primary h-11 w-11 shrink-0 !px-0">
               {streaming ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
             </button>
           </div>
@@ -452,6 +518,10 @@ function MessageBubble({ message, streaming }: { message: ChatMessage; streaming
               <ToolChip key={c.id} card={c} />
             ))}
           </div>
+        )}
+        {isUser && message.image && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={message.image} alt="Imagen adjunta" className="mb-2 max-h-48 rounded-md border border-border" />
         )}
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>

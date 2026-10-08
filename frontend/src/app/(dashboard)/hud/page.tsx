@@ -8,9 +8,10 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { HudCore } from "@/components/HudCore";
 import { HoloCard } from "@/components/HoloCard";
-import { SentenceSpeaker, cancelAll, onSpeakingChange, ttsAvailable, warmUpVoices } from "@/lib/tts";
+import { SentenceSpeaker, cancelAll, unlockAudio, onSpeakingChange, ttsAvailable, warmUpVoices } from "@/lib/tts";
 import { useVoiceLoop, voiceCaptureSupported, type VoicePhase } from "@/lib/useVoiceLoop";
 import { playBlip, playOnline } from "@/lib/sound";
+import { GeminiLive, liveSupported, type LivePhase } from "@/lib/geminiLive";
 import type { ToolCard, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +51,11 @@ export default function HudPage() {
   const [cards, setCards] = useState<ToolCard[]>([]);
   const [typed, setTyped] = useState("");
   const [convId, setConvId] = useState<string | null>(null);
+  const [liveAvailable, setLiveAvailable] = useState(false);
+  const [engine, setEngine] = useState<"classic" | "live">("classic");
+  const [livePhase, setLivePhase] = useState<LivePhase | null>(null);
+  const liveRef = useRef<GeminiLive | null>(null);
+  const liveLevel = useRef({ current: 0 });
 
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
@@ -68,18 +74,91 @@ export default function HudPage() {
       /* ignore */
     }
     const off = onSpeakingChange(setSpeaking);
+    api
+      .get<{ gemini?: { live?: boolean } }>("/api/chat/status")
+      .then((r) => {
+        const ok = !!r.gemini?.live && liveSupported();
+        setLiveAvailable(ok);
+        let saved: string | null = null;
+        try { saved = localStorage.getItem("nova.hud.engine"); } catch { /* ignore */ }
+        if (ok && saved !== "classic") setEngine("live");
+      })
+      .catch(() => {});
     return () => {
       off();
       cancelAll();
       abortRef.current?.abort();
+      liveRef.current?.close();
     };
   }, []);
 
+  function chooseEngine(e: "classic" | "live") {
+    if (e === engine) return;
+    stopAll();
+    setEngine(e);
+    try { localStorage.setItem("nova.hud.engine", e); } catch { /* ignore */ }
+  }
+
+  function stopAll() {
+    cancelAll();
+    abortRef.current?.abort();
+    liveRef.current?.close();
+    liveRef.current = null;
+    setLivePhase(null);
+    setActive(false);
+  }
+
+  function startLive() {
+    unlockAudio();
+    setUserLine("");
+    setNovaLine("");
+    let freshUser = true;
+    const live = new GeminiLive({
+      onPhase: (p) => {
+        setLivePhase(p);
+        if (p === "listening") freshUser = true;
+      },
+      onUserText: (t) => {
+        setUserLine((prev) => (freshUser ? t : prev + t).trimStart());
+        freshUser = false;
+      },
+      onTurnStart: () => {
+        setNovaLine("");
+        freshUser = true;
+      },
+      onModelText: (t) => setNovaLine((prev) => prev + t),
+      onCard: (card) =>
+        setCards((prev) => {
+          const i = prev.findIndex((c) => c.id === card.id);
+          if (i >= 0) {
+            const next = [...prev];
+            next[i] = card;
+            return next;
+          }
+          return [card, ...prev].slice(0, 4);
+        }),
+      onError: (m) => {
+        pushToast({ title: m, variant: "error" });
+        liveRef.current = null;
+        setLivePhase(null);
+        setActive(false);
+      },
+    });
+    liveRef.current = live;
+    liveLevel.current = live.levelRef;
+    void live.start();
+  }
+
   async function send(text: string) {
     const t = text.trim();
+    if (engine === "live" && liveRef.current) {
+      liveRef.current.sendText(t);
+      return;
+    }
     if (!t || streamingRef.current) return;
     playBlip();
     cancelAll();
+    unlockAudio();
     setUserLine(t);
     setNovaLine("");
     setStreaming(true);
@@ -137,7 +216,7 @@ export default function HudPage() {
   sendRef.current = send;
 
   const voice = useVoiceLoop({
-    enabled: active,
+    enabled: active && engine === "classic",
     sttLang,
     isBusy: () => streamingRef.current,
     onUtterance: (t) => sendRef.current(t),
@@ -155,6 +234,7 @@ export default function HudPage() {
     }
     playOnline();
     setActive(true);
+    if (engine === "live") startLive();
   }
 
   async function switchPersona(id: string) {
@@ -163,16 +243,30 @@ export default function HudPage() {
       const updated = await api.patch<User>("/api/users/me/preferences", { persona: id });
       setUser(updated);
       pushToast({ title: `Personalidad: ${id}`, variant: "success" });
+      // Live sessions bake the persona into the session: restart to apply it.
+      if (engine === "live" && liveRef.current) {
+        liveRef.current.close();
+        startLive();
+      }
     } catch {
       pushToast({ title: "No se pudo cambiar la personalidad", variant: "error" });
     }
   }
 
-  const corePhase: VoicePhase | "speaking" | "thinking" = speaking
-    ? "speaking"
-    : streaming
-      ? "thinking"
-      : voice.phase;
+  const isLive = engine === "live" && livePhase !== null;
+  const corePhase: VoicePhase | "speaking" | "thinking" = isLive
+    ? livePhase === "speaking"
+      ? "speaking"
+      : livePhase === "thinking" || livePhase === "connecting"
+        ? "thinking"
+        : livePhase === "listening"
+          ? "listening"
+          : "off"
+    : speaking
+      ? "speaking"
+      : streaming
+        ? "thinking"
+        : voice.phase;
   const tail = novaLine.length > 320 ? "…" + novaLine.slice(-320) : novaLine;
 
   return (
@@ -184,7 +278,10 @@ export default function HudPage() {
       <header className="relative z-10 flex items-center justify-between gap-3 px-4 py-3 md:px-8">
         <div>
           <p className="text-sm font-semibold tracking-[0.3em]">NOVA · {persona}</p>
-          <p className="nova-label mt-0.5 !text-primary">{PHASE_TEXT[corePhase] || ""}</p>
+          <p className="nova-label mt-0.5 !text-primary">
+            {livePhase === "connecting" ? "Conectando" : PHASE_TEXT[corePhase] || ""}
+            {engine === "live" ? " · Live" : ""}
+          </p>
         </div>
         <div className="hidden items-center gap-1 rounded-md border border-border bg-surface/60 p-1 sm:flex">
           {PERSONAS.map((p) => (
@@ -202,6 +299,23 @@ export default function HudPage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
+          {liveAvailable && (
+            <div className="flex items-center gap-1 rounded-md border border-border bg-surface/60 p-1" title="Motor de voz">
+              {(["live", "classic"] as const).map((e) => (
+                <button
+                  key={e}
+                  onClick={() => chooseEngine(e)}
+                  className={cn(
+                    "rounded-sm px-2.5 py-1 text-[10px] tracking-[0.16em] transition",
+                    engine === e ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title={e === "live" ? "Gemini Live: voz en tiempo real" : "Clásico: Groq + Whisper"}
+                >
+                  {e === "live" ? "LIVE" : "CLÁSICO"}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             onClick={() => setVoiceOn((v) => { if (v) cancelAll(); return !v; })}
             className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface/60 text-muted-foreground hover:text-foreground"
@@ -222,7 +336,7 @@ export default function HudPage() {
       {/* body */}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-4 lg:flex-row lg:gap-10">
         <div className="flex min-w-0 flex-1 flex-col items-center">
-          <HudCore size={300} levelRef={voice.levelRef} phase={corePhase} />
+          <HudCore size={300} levelRef={isLive ? liveLevel.current : voice.levelRef} phase={corePhase} />
           <div className="mt-4 w-full max-w-2xl text-center">
             {userLine && <p className="nova-label mb-2 truncate">Tú · {userLine}</p>}
             <p className="hud-subtitle min-h-[3.5rem] text-lg leading-relaxed text-foreground md:text-xl">
@@ -263,11 +377,11 @@ export default function HudPage() {
             </button>
           ) : (
             <button
-              onClick={() => { cancelAll(); setActive(false); }}
+              onClick={stopAll}
               className="nova-btn-ghost h-11 w-11 shrink-0 !px-0"
               title="Desactivar micrófono"
             >
-              {voice.phase === "off" ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5 text-primary" />}
+              {(isLive ? livePhase === "closed" : voice.phase === "off") ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5 text-primary" />}
             </button>
           )}
           <form

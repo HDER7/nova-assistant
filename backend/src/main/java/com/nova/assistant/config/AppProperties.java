@@ -60,6 +60,8 @@ public class AppProperties {
         private String provider = "openai";
         private OpenAi openai = new OpenAi();
         private Models models = new Models();
+        /** Google Gemini (free tier): second brain, vision, neural voice, notebooks and Live voice. */
+        private Gemini gemini = new Gemini();
         /** Optional local brain: an OpenAI-compatible server such as OpenJarvis (`jarvis serve`) or Ollama. */
         private Local local = new Local();
     }
@@ -71,6 +73,28 @@ public class AppProperties {
         private String baseUrl = "https://api.openai.com/v1";
         private double temperature = 0.6;
         private int maxTokens = 1024;
+    }
+
+    @Getter @Setter
+    public static class Gemini {
+        private String apiKey = "";
+        private String baseUrl = "https://generativelanguage.googleapis.com/v1beta";
+        /** Chat / fallback brain (via the OpenAI-compatible endpoint). */
+        private String chatModel = "gemini-3.8-flash";
+        /** Used when the user attaches an image. */
+        private String visionModel = "gemini-3.8-flash";
+        /** Grounded Q&A and audio-overview scripts for notebooks. */
+        private String notebookModel = "gemini-3.8-flash";
+        private String ttsModel = "gemini-3.8-flash-lite-tts";
+        /** Higher-fidelity TTS used for notebook audio overviews (multi-speaker). */
+        private String podcastTtsModel = "gemini-3.8-flash-tts";
+        private String liveModel = "gemini-3.8-live";
+        /** When Groq fails (rate limit, outage), retry the chat turn with Gemini. */
+        private boolean fallback = true;
+        private boolean tts = true;
+        private boolean live = true;
+
+        public boolean available() { return apiKey != null && !apiKey.isBlank(); }
     }
 
     @Getter @Setter

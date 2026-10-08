@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Menu, Moon, Sun, LogOut, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { soundMuted, setSoundMuted, playConfirm } from "@/lib/sound";
+import { setNeuralAvailable } from "@/lib/tts";
 import { useTheme } from "@/providers/ThemeProvider";
 import { useAuthStore } from "@/store/authStore";
 import { NotificationsBell } from "@/components/NotificationsBell";
@@ -18,7 +19,13 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
   const [muted, setMuted] = useState(false);
 
   useEffect(() => {
-    api.get<{ live: boolean; model: string }>("/api/chat/status").then(setStatus).catch(() => {});
+    api
+      .get<{ live: boolean; model: string; gemini?: { tts?: boolean } }>("/api/chat/status")
+      .then((st) => {
+        setStatus(st);
+        setNeuralAvailable(!!st.gemini?.tts);
+      })
+      .catch(() => {});
     setMuted(soundMuted());
   }, []);
 
