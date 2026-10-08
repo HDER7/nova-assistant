@@ -197,7 +197,7 @@ public class GeminiService {
         body.put("uses", 1);
         body.put("expireTime", now.plus(30, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS).toString());
         body.put("newSessionExpireTime", now.plus(2, ChronoUnit.MINUTES).truncatedTo(ChronoUnit.SECONDS).toString());
-        body.put("liveConnectConstraints", Map.of("model", "models/" + cfg().getLiveModel()));
+        // (Tested against the live API: v1beta auth_tokens rejects "liveConnectConstraints"; the browser sends the full setup.)
         JsonNode res = nativeClient().post().uri("/auth_tokens")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -209,6 +209,15 @@ public class GeminiService {
             throw new IllegalStateException("Gemini no devolvio un token de sesion");
         }
         return name;
+    }
+
+    /** Chat model followed by backups — Gemini sometimes answers 503 "high demand" on the newest model. */
+    public java.util.List<String> chatModels(String primary) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        if (primary != null && !primary.isBlank()) out.add(primary.trim());
+        out.add(cfg().getChatModel());
+        for (String m : cfg().getFallbackModels().split(",")) if (!m.isBlank()) out.add(m.trim());
+        return new java.util.ArrayList<>(out);
     }
 
     public String liveModel() {

@@ -85,6 +85,7 @@ nova:
     gemini:
       api-key: ${NOVA_AI_GEMINI_API_KEY:}
       chat-model: ${NOVA_AI_GEMINI_CHAT_MODEL:gemini-3.8-flash}
+      fallback-models: ${NOVA_AI_GEMINI_FALLBACK_MODELS:gemini-3.6-flash,gemini-3.5-flash}
       vision-model: ${NOVA_AI_GEMINI_VISION_MODEL:gemini-3.8-flash}
       notebook-model: ${NOVA_AI_GEMINI_NOTEBOOK_MODEL:gemini-3.8-flash}
       tts-model: ${NOVA_AI_GEMINI_TTS_MODEL:gemini-3.8-flash-lite-tts}

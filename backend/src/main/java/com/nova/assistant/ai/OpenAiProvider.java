@@ -153,7 +153,17 @@ public class OpenAiProvider implements AiProvider {
                             JsonNode toolCalls = delta.get("tool_calls");
                             if (toolCalls != null && toolCalls.isArray()) {
                                 for (JsonNode tc : toolCalls) {
-                                    int idx = tc.path("index").asInt(calls.size());
+                                    // Gemini omits "index": match by id, else append (or continue the last call).
+                                    int idx;
+                                    if (tc.has("index")) {
+                                        idx = tc.get("index").asInt();
+                                    } else if (tc.hasNonNull("id")) {
+                                        String tid = tc.get("id").asText();
+                                        idx = calls.entrySet().stream().filter(en -> tid.equals(en.getValue().get("id")))
+                                                .map(Map.Entry::getKey).findFirst().orElse(calls.size());
+                                    } else {
+                                        idx = calls.isEmpty() ? 0 : calls.lastKey();
+                                    }
                                     Map<String, Object> acc = calls.computeIfAbsent(idx, k -> {
                                         Map<String, Object> m = new HashMap<>();
                                         Map<String, Object> f = new HashMap<>();

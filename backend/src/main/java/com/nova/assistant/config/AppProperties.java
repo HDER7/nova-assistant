@@ -81,6 +81,8 @@ public class AppProperties {
         private String baseUrl = "https://generativelanguage.googleapis.com/v1beta";
         /** Chat / fallback brain (via the OpenAI-compatible endpoint). */
         private String chatModel = "gemini-3.8-flash";
+        /** Tried in order when the chat model is overloaded (503) or rate-limited (429). */
+        private String fallbackModels = "gemini-3.6-flash,gemini-3.5-flash";
         /** Used when the user attaches an image. */
         private String visionModel = "gemini-3.8-flash";
         /** Grounded Q&A and audio-overview scripts for notebooks. */

@@ -266,21 +266,42 @@ public class NotebookService {
     }
 
     private String call(OpenAiProvider ai, List<Map<String, Object>> msgs, double temperature, int maxTokens) {
-        try {
-            Map<String, Object> res = ai.chatRaw(msgs, null, temperature, maxTokens, properties.getAi().getGemini().getNotebookModel());
-            Object c = res.get("content");
-            String text = c == null ? "" : c.toString().trim();
-            if (text.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "Gemini devolvió una respuesta vacía.");
-            return text;
-        } catch (RestClientResponseException e) {
+        List<String> models = gemini.chatModels(properties.getAi().getGemini().getNotebookModel());
+        for (int i = 0; i < models.size(); i++) {
+            try {
+                return callOnce(ai, msgs, temperature, maxTokens, models.get(i));
+            } catch (RestClientResponseException e) {
+                int s = e.getStatusCode().value();
+                boolean busy = s == 503 || s == 429 || s >= 500;
+                if (busy && i < models.size() - 1) {
+                    log.info("Notebook model {} busy ({}), trying {}", models.get(i), s, models.get(i + 1));
+                    continue;
+                }
+                throw translate(e);
+            }
+        }
+        throw new ApiException(HttpStatus.BAD_GATEWAY, "Gemini no respondió. Inténtalo de nuevo.");
+    }
+
+    private String callOnce(OpenAiProvider ai, List<Map<String, Object>> msgs, double temperature, int maxTokens, String model) {
+        Map<String, Object> res = ai.chatRaw(msgs, null, temperature, maxTokens, model);
+        Object c = res.get("content");
+        String text = c == null ? "" : c.toString().trim();
+        if (text.isBlank()) throw new ApiException(HttpStatus.BAD_GATEWAY, "Gemini devolvió una respuesta vacía.");
+        return text;
+    }
+
+    private ApiException translate(RestClientResponseException e) {
+        {
             int s = e.getStatusCode().value();
             log.warn("Notebook Gemini call failed HTTP {}: {}", s, cut(e.getResponseBodyAsString()));
-            if (s == 429) throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Límite del plan gratuito de Gemini alcanzado. Espera un minuto.");
+            if (s == 429) return new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Límite del plan gratuito de Gemini alcanzado. Espera un minuto.");
+            if (s == 503) return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "Gemini está saturado en este momento. Inténtalo en unos segundos.");
             if (s == 400 && e.getResponseBodyAsString().toLowerCase().contains("token")) {
-                throw ApiException.badRequest("Las fuentes son demasiado largas para una sola consulta. Elimina alguna fuente.");
+                return ApiException.badRequest("Las fuentes son demasiado largas para una sola consulta. Elimina alguna fuente.");
             }
-            if (s == 401 || s == 403) throw new ApiException(HttpStatus.BAD_GATEWAY, "La clave de Gemini no es válida.");
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "Gemini no respondió. Inténtalo de nuevo.");
+            if (s == 401 || s == 403) return new ApiException(HttpStatus.BAD_GATEWAY, "La clave de Gemini no es válida.");
+            return new ApiException(HttpStatus.BAD_GATEWAY, "Gemini no respondió. Inténtalo de nuevo.");
         }
     }
 

@@ -269,9 +269,13 @@ public class AiService {
             list.add(m.isEmpty() ? null : m);
             if (list.size() >= MAX_MODEL_ATTEMPTS) break;
         }
-        // Last resort: Gemini (separate free quota) when every Groq model is rate-limited or down.
-        String g = GEMINI + properties.getAi().getGemini().getChatModel();
-        if (includeGemini && geminiOk && properties.getAi().getGemini().isFallback() && !list.contains(g)) list.add(g);
+        // Last resort: Gemini (separate free quota) when every Groq model is rate-limited or down,
+        // with Gemini's own backups in case its newest model is overloaded.
+        if (includeGemini && geminiOk && properties.getAi().getGemini().isFallback()) {
+            for (String gm : gemini.chatModels(null)) {
+                if (!list.contains(GEMINI + gm)) list.add(GEMINI + gm);
+            }
+        }
         return list;
     }
 
@@ -354,7 +358,7 @@ public class AiService {
         // Cloud: walk the model chain so a retired or rate-limited model doesn't break the conversation.
         Exception last = null;
         List<String> chain = image != null
-                ? List.of(GEMINI + properties.getAi().getGemini().getVisionModel())   // vision = Gemini only
+                ? gemini.chatModels(properties.getAi().getGemini().getVisionModel()).stream().map(m -> GEMINI + m).toList()
                 : candidates(model, true);
         for (String candidate : chain) {
             OpenAiProvider target = isGemini(candidate) ? gemini.chat() : openAi;

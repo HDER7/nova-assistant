@@ -74,10 +74,12 @@ public class LiveController {
         String persona = persistence.personaOf(p.getId());
         Map<String, Object> setup = new LinkedHashMap<>();
         setup.put("model", "models/" + gemini.liveModel());
-        setup.put("responseModalities", List.of("AUDIO"));
+        // Verified against the live API: modalities + voice go inside generationConfig.
+        setup.put("generationConfig", Map.of(
+                "responseModalities", List.of("AUDIO"),
+                "speechConfig", Map.of("voiceConfig", Map.of("prebuiltVoiceConfig", Map.of("voiceName", SpeechService.voiceFor(persona))))));
         setup.put("systemInstruction", Map.of("parts", List.of(Map.of("text", persistence.liveSystemPrompt(p.getId())))));
         setup.put("tools", List.of(Map.of("functionDeclarations", decls)));
-        setup.put("speechConfig", Map.of("voiceConfig", Map.of("prebuiltVoiceConfig", Map.of("voiceName", SpeechService.voiceFor(persona)))));
         setup.put("inputAudioTranscription", Map.of());
         setup.put("outputAudioTranscription", Map.of());
 
