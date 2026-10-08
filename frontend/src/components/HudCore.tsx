@@ -6,7 +6,7 @@ import { ArcReactor } from "@/components/ArcReactor";
 import type { VoicePhase } from "@/lib/useVoiceLoop";
 
 /**
- * The HUD centrepiece: the Rivas "R" inside tactical rings.
+ * The HUD centrepiece: the Heider brush "H" inside tactical rings.
  * - Reacts to the microphone level while you talk (levelRef from useVoiceLoop).
  * - Pulses on every word NOVA speaks (speech boundary events).
  * Animation runs on requestAnimationFrame and mutates SVG attributes directly — no React re-renders.
@@ -120,9 +120,9 @@ export function HudCore({
       <circle ref={ringRef} r="118" fill="none" stroke="hsl(var(--primary))" strokeOpacity="0.4" strokeWidth="1" />
       <circle r="86" fill="hsl(var(--background))" fillOpacity="0.55" stroke="hsl(var(--border))" />
 
-      {/* Rivas Industries crest */}
-      <g transform="translate(-52 -58)">
-        <ArcReactor size={104} />
+      {/* Heider Industries crest */}
+      <g transform="translate(-72 -72)">
+        <ArcReactor size={144} />
       </g>
     </svg>
   );

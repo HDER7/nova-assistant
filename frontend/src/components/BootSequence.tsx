@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RivasLockup } from "@/components/ArcReactor";
+import { HeiderLockup } from "@/components/ArcReactor";
 import { playOnline } from "@/lib/sound";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +42,7 @@ export function BootSequence() {
   if (!show) return null;
   return (
     <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-6 bg-background">
-      <RivasLockup width={260} />
+      <HeiderLockup width={260} />
       <p className="nova-label">Inicializando NOVA</p>
       <div className="w-64 space-y-1.5">
         {LINES.map((l, i) => (

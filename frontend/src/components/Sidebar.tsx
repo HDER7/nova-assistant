@@ -42,7 +42,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             <ArcReactor size={30} />
             <div>
               <p className="text-sm font-semibold leading-tight tracking-[0.24em]">NOVA</p>
-              <p className="nova-label mt-0.5">Rivas Industries</p>
+              <p className="nova-label mt-0.5">Heider Industries</p>
             </div>
           </Link>
           <button className="text-muted-foreground md:hidden" onClick={onClose}>
